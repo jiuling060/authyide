@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="AuthyIDE logo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g fill="#ffffff">
+    <circle cx="164" cy="168" r="58"/>
+    <circle cx="348" cy="168" r="58"/>
+    <circle cx="164" cy="168" r="30" fill="#1d4ed8"/>
+    <circle cx="348" cy="168" r="30" fill="#1d4ed8"/>
+    <ellipse cx="256" cy="276" rx="150" ry="140"/>
+  </g>
+  <g fill="#1d4ed8">
+    <ellipse cx="256" cy="318" rx="66" ry="50"/>
+    <circle cx="205" cy="250" r="17"/>
+    <circle cx="307" cy="250" r="17"/>
+    <ellipse cx="256" cy="300" rx="26" ry="18" fill="#0b1220"/>
+  </g>
+</svg>

@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS app_build_jobs;
+DROP TABLE IF EXISTS apps;
+DROP TABLE IF EXISTS entitlements;

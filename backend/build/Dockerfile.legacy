@@ -1,0 +1,34 @@
+FROM golang:1.25.8-alpine3.23 AS builder
+
+WORKDIR /src
+ENV CGO_ENABLED=0
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN GOOS=linux GOARCH=amd64 go build -o /out/main cmd/server/main.go
+
+FROM node:20-bookworm-slim AS runtime
+
+# Debian userland: the mounted JDK and the Android SDK host tools are glibc
+# builds, and gradle runs inside this container for app builds. A musl runtime
+# cannot load them. Node stays because expo prebuild resolves from the
+# node_modules of the mounted mobile workspace.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openjdk-17-jdk-headless tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY migration ./migration
+
+COPY --from=builder /out/main /app/main
+
+EXPOSE 8888
+
+ENV TZ=Asia/Shanghai
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:/usr/local/bin:/usr/bin:/bin
+
+CMD [ "./main" ]

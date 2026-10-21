@@ -1,0 +1,5503 @@
+openapi: 3.1.0
+info:
+  title: MonkeyAI Agent API
+  version: 1.0.0
+servers:
+  - url: /
+security:
+  - OAuthAccessToken: []
+paths:
+  /api/v1/sessions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    put:
+      summary: 创建或更新一期会话元数据快照
+      description: 接收统计元数据及可选会话标题；state_seq 单调递增，同序号内容必须一致；机器 ID 只用于认领宿主，不是认证凭证。省略标题字段时保留已有值，未知字段会被忽略。
+      parameters:
+        - name: X-MAI-Machine-ID
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [state_seq, client, session_type, started_at]
+              properties:
+                state_seq: {type: integer, format: int64, minimum: 0}
+                client:
+                  type: object
+                  additionalProperties: true
+                  required: [type, machine_id, version]
+                  properties:
+                    type: {type: string, enum: [desktop, web, extension, mobile, unknown]}
+                    machine_id: {type: string, format: uuid}
+                    version: {type: string}
+                    engine_version: {type: [string, 'null']}
+                    runtime_version: {type: [string, 'null']}
+                session_type: {type: string, enum: [conversation, workflow, tool, scheduled]}
+                parent_session_id: {type: [string, 'null'], format: uuid}
+                title: {type: [string, 'null'], description: UTF-8 最多 512 字节}
+                title_source: {type: [string, 'null'], description: UTF-8 最多 128 字节}
+                expert_id: {type: [string, 'null'], format: uuid}
+                model_id: {type: [string, 'null'], format: uuid}
+                mode: {type: [string, 'null']}
+                workspace_kind: {type: [string, 'null']}
+                started_at: {type: string, format: date-time}
+                client_deleted_at: {type: [string, 'null'], format: date-time}
+      responses:
+        '200':
+          description: 已确认的会话快照及轮次游标
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state_seq, acked_turn, server_time]
+                properties:
+                  state_seq: {type: integer, format: int64}
+                  acked_turn: {type: integer}
+                  server_time: {type: string, format: date-time}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/ResourceError403'}
+        '409': {$ref: '#/components/responses/ResourceError409'}
+        '429': {description: 请求过于频繁，遵守 Retry-After}
+  /api/v1/sessions/{id}/turns:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      summary: 批量追加已完成的轮次报告
+      description: 接收已完成轮次的统计事实、可选用户正文及封存本轮时的会话标题；仅处理已声明字段，未知字段会被忽略。
+      parameters:
+        - name: X-MAI-Machine-ID
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+        - name: after_turn
+          in: query
+          required: true
+          schema: {type: integer, minimum: 0}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [facts_version, turns]
+              properties:
+                facts_version: {type: integer, minimum: 1}
+                snapshots:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    additionalProperties: true
+                    required: [snapshot_id, items]
+                    properties:
+                      snapshot_id: {type: string, description: 'sha256: 前缀的规范化资源快照摘要'}
+                      revision: {type: [integer, 'null']}
+                      state_version: {type: [integer, 'null']}
+                      items: {type: array, items: {type: object}}
+                turns:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    additionalProperties: true
+                    required: [turn_index, input_seq, started_at, ended_at, stop_reason, resources_snapshot_id, input]
+                    properties:
+                      turn_index: {type: integer, minimum: 1}
+                      input_seq: {type: integer, format: int64}
+                      started_at: {type: string, format: date-time}
+                      ended_at: {type: string, format: date-time}
+                      stop_reason: {type: string, enum: [complete, interrupted, error, max_turns, output_limit, unknown]}
+                      error_code: {type: [string, 'null']}
+                      recovered: {type: boolean}
+                      model_id: {type: [string, 'null'], format: uuid}
+                      title: {type: [string, 'null'], description: 封存本轮时的会话标题，UTF-8 最多 512 字节，不得含 NUL}
+                      title_source: {type: [string, 'null'], enum: [prompt, agent, user, null]}
+                      thinking: {type: [object, 'null'], description: enabled 和 effort，不含思考内容}
+                      resources_snapshot_id: {type: string}
+                      client_version: {type: [string, 'null']}
+                      engine_version: {type: [string, 'null']}
+                      usage: {type: [object, 'null'], description: 仅四类 Token 计数，不含请求或响应正文}
+                      subagent_usage: {type: [object, 'null']}
+                      context_used: {type: [integer, 'null']}
+                      context_window: {type: [integer, 'null']}
+                      input:
+                        type: object
+                        additionalProperties: true
+                        required: [kind]
+                        description: 输入类型、来源、正文、截断标记及数量统计；正文去掉附件行，可含换行。
+                        properties:
+                          kind: {type: string}
+                          text: {type: [string, 'null'], description: 客户端最多保留 2000 个 Unicode 码点，服务端上限为 8192 UTF-8 字节，不得含 NUL}
+                          text_truncated: {type: boolean, default: false, description: 正文被截断时为 true，未截断时可省略}
+                          origin:
+                            type: [object, 'null']
+                            additionalProperties: true
+                            properties:
+                              client_type: {type: [string, 'null']}
+                              machine_id: {type: [string, 'null']}
+                          command_skill_id: {type: [string, 'null']}
+                          attachments: {type: integer, minimum: 0}
+                          canvas_nodes: {type: integer, minimum: 0}
+                          steers: {type: integer, minimum: 0}
+                      files_changed: {type: object, description: 仅 created、updated、deleted 数量}
+                      compactions: {type: integer}
+                      permissions: {type: object, description: 仅 asked、allowed、denied 数量}
+                      tools: {type: array, maxItems: 500, items: {type: object}}
+                      skill_events: {type: array, items: {type: object}}
+                      truncated: {type: boolean}
+      responses:
+        '200':
+          description: 已确认轮次和资源快照
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [acked_turn, accepted, duplicates, snapshots_acked]
+                properties:
+                  acked_turn: {type: integer}
+                  accepted: {type: integer}
+                  duplicates: {type: integer}
+                  snapshots_acked: {type: array, items: {type: string}}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/ResourceError403'}
+        '404': {$ref: '#/components/responses/ResourceError404'}
+        '409': {$ref: '#/components/responses/ResourceError409'}
+        '413': {description: 请求体超过服务端限制}
+        '422': {description: facts_version 不支持，错误响应包含 supported}
+        '429': {description: 请求过于频繁，遵守 Retry-After}
+  /api/v1/endpoints:
+    get:
+      summary: 分页读取当前用户端点
+      description: 包含已停用端点；online 仅代表当前单进程连接。响应不缓存。
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 1, maximum: 1000000, default: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: 端点分页
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, page, page_size]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Endpoint'}}
+                  total: {type: integer}
+                  page: {type: integer}
+                  page_size: {type: integer}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/EndpointUnavailable'}
+  /api/v1/endpoints/connect:
+    get:
+      summary: 建立原生客户端端点桥接 WebSocket
+      description: >-
+        仅接受 OAuth Bearer access token，不接受 Cookie 或 URL token。
+        非空 Origin 必须匹配 MONKEYAI_PUBLIC_URL；生产使用 WSS。
+        Upgrade 后 5 秒内发送 hello，服务端依次发送 welcome、directory.snapshot。
+        使用协议主版本 1，UTF-8 JSON 文本消息最大 256 KiB（含分片累计），禁用压缩。
+        request/response/event 信封及关闭码详见 design/endpoint-bridge-design.md。
+        4003 需恢复 OAuth 凭据，4001/4002 不自动重连；断线不得自动重发业务消息。
+      responses:
+        '101': {description: WebSocket 升级成功}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/ResourceError403'}
+        '429':
+          description: 当前用户建连过于频繁，遵循 Retry-After 退避
+          headers:
+            Retry-After: {schema: {type: integer}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ResourceError'}
+        '503': {$ref: '#/components/responses/EndpointUnavailable'}
+  /api/v1/endpoints/{machine_id}:
+    parameters:
+      - {$ref: '#/components/parameters/EndpointMachine'}
+    put:
+      summary: 登记或更新当前用户的设备元数据
+      description: 不依赖会话上报开关；不会恢复已撤销端点；active 端点最多 20 个。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [device_name, platform, os_version, arch, client_version]
+              properties:
+                device_name: {type: string, maxLength: 128}
+                platform: {type: string, enum: [macos, windows, linux, ios, android, web]}
+                os_version: {type: string, maxLength: 64}
+                arch: {type: string, maxLength: 32}
+                client_version: {type: string, maxLength: 64}
+                protocol_version: {type: [integer, 'null']}
+                client_type: {type: [string, 'null']}
+                client_name: {type: [string, 'null']}
+                channel: {type: [string, 'null']}
+                locale: {type: [string, 'null']}
+                system_locale: {type: [string, 'null']}
+                timezone: {type: [string, 'null']}
+                runtime_version: {type: [string, 'null']}
+                engine_version: {type: [string, 'null']}
+                electron_version: {type: [string, 'null']}
+      responses:
+        '200': {$ref: '#/components/responses/EndpointResult'}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {description: endpoint_limit_exceeded 或 endpoint_revoked}
+        '429': {description: 设备登记每用户每小时最多十次，遵守 Retry-After}
+        '503': {$ref: '#/components/responses/EndpointUnavailable'}
+    get:
+      summary: 读取当前用户的单个端点
+      responses:
+        '200': {$ref: '#/components/responses/EndpointResult'}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/ResourceError404'}
+        '503': {$ref: '#/components/responses/EndpointUnavailable'}
+    patch:
+      summary: 修改端点别名
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [alias]
+              properties:
+                alias:
+                  type: [string, 'null']
+                  description: null 清除别名；非空白文本最多 128 UTF-8 字节，拒绝控制字符
+      responses:
+        '200': {$ref: '#/components/responses/EndpointResult'}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/ResourceError404'}
+        '503': {$ref: '#/components/responses/EndpointUnavailable'}
+  /api/v1/endpoints/{machine_id}/revoke:
+    parameters:
+      - {$ref: '#/components/parameters/EndpointMachine'}
+    post:
+      summary: 停用端点并断开连接
+      description: 幂等，不接受请求体。不等于撤销设备登录授权，持有有效账号凭据仍可显式恢复。
+      responses:
+        '200': {$ref: '#/components/responses/EndpointResult'}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/ResourceError404'}
+        '503': {$ref: '#/components/responses/EndpointUnavailable'}
+  /api/v1/endpoints/{machine_id}/restore:
+    parameters:
+      - {$ref: '#/components/parameters/EndpointMachine'}
+    post:
+      summary: 恢复已停用端点
+      description: 幂等，不接受请求体。不主动建立连接；active 端点最多 20 个，离线也计入。
+      responses:
+        '200': {$ref: '#/components/responses/EndpointResult'}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/ResourceError404'}
+        '409':
+          description: active 端点达到上限，错误码 endpoint_limit_exceeded
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ResourceError'}
+        '503': {$ref: '#/components/responses/EndpointUnavailable'}
+  /oauth/connectors/{id}/callback:
+    get:
+      summary: 处理指定 MCP 的 OAuth 回调
+      description: 校验 MCP id 与 state 绑定、有效期及配置版本，单次消费授权事务并在服务端交换和保存 Token。无需浏览器会话或 Agent Token。
+      security: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: code
+        in: query
+        description: 授权成功时返回的授权码。
+        schema:
+          type: string
+      - name: error
+        in: query
+        description: 授权拒绝或取消时返回的错误码。
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 凭证已保存，浏览器显示授权成功页面。
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+  /api/auth/v1/methods:
+    get:
+      summary: 读取公开登录方式开关
+      security: []
+      responses:
+        "200":
+          description: 仅包含登录开关，不包含 SMTP 或 OAuth 密钥
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailLoginMethods"
+        "503":
+          description: 认证配置不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+  /api/auth/v1/branding:
+    get:
+      summary: 读取公开品牌信息
+      description: 返回登录页展示所需的团队名称和工具名称；未配置或配置不可用时返回默认值，不包含其他设置。
+      security: []
+      responses:
+        "200":
+          description: 公开品牌信息
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - workspace_name
+                  - product_name
+                properties:
+                  workspace_name:
+                    type: string
+                    description: 团队名称。
+                  product_name:
+                    type: string
+                    description: 工具名称。
+  /api/auth/v1/email/code:
+    post:
+      summary: 发送邮箱验证码
+      description: login 受 email_code_enabled 控制；reset 受 password_enabled 控制。每邮箱每分钟最多 1 次、每小时最多 10 次，每连接来源 IP 每小时最多 30
+        次；失败发送也计入限额。开启 email_code_auto_registration_enabled 时，新邮箱可获取 login 验证码；
+        未开启自动注册的未知邮箱、停用或不符合用途的账号返回相同成功响应但不发送邮件。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - purpose
+              properties:
+                email: &a1
+                  type: string
+                  format: email
+                  maxLength: 254
+                  description: 邮箱会去除首尾空白并转为小写。
+                purpose:
+                  type: string
+                  enum:
+                    - login
+                    - reset
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - message
+                  - retry_after
+                properties:
+                  message:
+                    type: string
+                  retry_after:
+                    type: integer
+                    const: 30
+        "400":
+          description: 请求无效，或验证码无效、过期、超过错误次数限制
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "401":
+          description: 邮箱密码不匹配或账号不符合登录入口角色
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "403":
+          description: 对应登录方式或注册开关关闭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "409":
+          description: 邮箱已存在，注册冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "429":
+          description: 验证码发送过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                const: 60
+        "500":
+          description: 认证操作失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "502":
+          description: 邮件发送失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "503":
+          description: 认证配置或邮件服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+  /api/auth/v1/email/reset-password:
+    post:
+      summary: 通过邮箱验证码重置密码
+      description: 使用 reset 用途验证码，需要开启密码登录。重置后撤销全部旧浏览器会话、OAuth token
+        和未使用授权码，并使现有登录验证码失效。不会自动登录。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - code
+                - password
+              properties:
+                email: *a1
+                code: &a2
+                  type: string
+                  pattern: ^[0-9]{6}$
+                  description: 十分钟内有效的六位数字验证码，仅可使用一次。
+                password: &a3
+                  type: string
+                  minLength: 12
+                  maxLength: 1024
+                  writeOnly: true
+                  description: 新密码至少 12 个字符，长度按 UTF-8 字节校验。
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - reset
+                properties:
+                  reset:
+                    type: boolean
+                    const: true
+        "400":
+          description: 请求无效，或验证码无效、过期、超过错误次数限制
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "401":
+          description: 邮箱密码不匹配或账号不符合登录入口角色
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "403":
+          description: 对应登录方式或注册开关关闭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "409":
+          description: 邮箱已存在，注册冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "429":
+          description: 验证码发送过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                const: 60
+        "500":
+          description: 认证操作失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "502":
+          description: 邮件发送失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "503":
+          description: 认证配置或邮件服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+  /api/auth/v1/login:
+    post:
+      summary: 使用密码登录客户端
+      description: 需要开启 password_enabled，允许启用状态的普通用户和管理员；成功设置 HttpOnly、SameSite=Lax 会话
+        Cookie，HTTPS 环境附加 Secure。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email: *a1
+                password:
+                  type: string
+                  maxLength: 1024
+                  writeOnly: true
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthUser"
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: monkeyai_session 会话 Cookie，默认有效期 7 天。
+        "400":
+          description: 请求无效，或验证码无效、过期、超过错误次数限制
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "401":
+          description: 邮箱密码不匹配或账号不符合登录入口角色
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "403":
+          description: 对应登录方式或注册开关关闭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "409":
+          description: 邮箱已存在，注册冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "429":
+          description: 验证码发送过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                const: 60
+        "500":
+          description: 认证操作失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "502":
+          description: 邮件发送失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "503":
+          description: 认证配置或邮件服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+  /api/auth/v1/email/login:
+    post:
+      summary: 使用邮箱验证码登录客户端
+      description: 需要开启 email_code_enabled，使用 login
+        用途验证码。允许启用状态的普通用户和管理员，成功建立浏览器会话；验证码最多允许 5 次错误尝试。
+        开启 email_code_auto_registration_enabled 时，新邮箱验证成功后自动创建无密码的普通账号并登录；
+        默认姓名为邮箱。提交验证码时重新检查开关，已有停用账号不能自动创建或登录。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - code
+              properties:
+                email: *a1
+                code: *a2
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthUser"
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: monkeyai_session 会话 Cookie，默认有效期 7 天。
+        "400":
+          description: 请求无效，或验证码无效、过期、超过错误次数限制
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "401":
+          description: 邮箱密码不匹配或账号不符合登录入口角色
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "403":
+          description: 对应登录方式或注册开关关闭
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "409":
+          description: 邮箱已存在，注册冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "429":
+          description: 验证码发送过于频繁
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                const: 60
+        "500":
+          description: 认证操作失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "502":
+          description: 邮件发送失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+        "503":
+          description: 认证配置或邮件服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailAuthError"
+  /api/v1/billing/account:
+    get:
+      summary: 查询当前用户积分状态
+      description: 使用 Bearer access token 确定用户，返回当前周期额度、余额及可用积分（等于余额）；冻结字段为兼容旧客户端保留，迁移后为零；周期到期后按最新额度创建新账户。余额和可用积分可能为负数，不应截断为零。
+      responses:
+        '200':
+          description: 请求成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditAccount'
+        '400':
+          description: 参数不合法
+        '401':
+          description: 未登录
+        '403':
+          description: 权限不足
+        '409':
+          description: 修订号、幂等键或交易状态冲突
+  /api/v1/billing/entries:
+    get:
+      summary: 分页查询当前用户积分消耗历史
+      description: 仅返回当前 Bearer access token 所属用户的扣费和退款记录，不包含额度发放、重置或管理员调整；默认查询所有周期，按发生时间、记录 ID 倒序排列。用户身份由服务端确定，不支持指定其他用户或分组，不返回内部元数据。
+      parameters:
+      - in: query
+        name: page
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          default: 1
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - in: query
+        name: content
+        description: 按消费项目名称模糊搜索。
+        schema:
+          type: string
+          maxLength: 200
+      - in: query
+        name: category
+        schema:
+          type: string
+          enum: [model, tool, other]
+      - in: query
+        name: mode
+        schema:
+          type: string
+          enum: [local, remote]
+      - in: query
+        name: entry_type
+        description: 不指定时同时返回扣费和退款。
+        schema:
+          type: string
+          enum: [charge, refund]
+      - in: query
+        name: from
+        description: 起始时间（含），须携带时区。
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: until
+        description: 结束时间（不含），须携带时区，且晚于起始时间。
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: 请求成功；无记录时 items 为 []。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditEntriesResponse'
+        '400':
+          description: 搜索条件、时间范围或流水类型不合法
+        '401':
+          description: 缺少、无效或已过期的 access token
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+  /mcp/connectors/{id}:
+    parameters:
+    - in: path
+      name: id
+      schema:
+        type: string
+        format: uuid
+      required: true
+    - in: header
+      name: MCP-Protocol-Version
+      description: 后续请求应携带握手协商的版本；未知版本返回 400。
+      schema:
+        type: string
+        enum:
+        - '2024-11-05'
+        - '2025-03-26'
+        - '2025-06-18'
+        - '2025-11-25'
+    post:
+      summary: 调用免认证连接的 MCP 网关
+      description: 仅用于免认证连接，使用全局 mcp:invoke API Key 认证用户并校验连接使用权。集中和独立认证必须改用具体凭证地址，省略凭证返回 400 credential_selection_required。
+        tools/list 和 tools/call 使用上游原始工具名称，并执行实时工具启停检查。
+      security:
+      - InvocationKey: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          maxLength: 128
+      - in: header
+        name: X-Session-ID
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jsonrpc:
+                  const: '2.0'
+                id:
+                  type:
+                  - string
+                  - number
+                  description: 请求必须携带，通知省略；原值随响应返回。
+                method:
+                  type: string
+                  examples:
+                  - initialize
+                  - notifications/initialized
+                  - ping
+                  - tools/list
+                  - tools/call
+                params:
+                  type: object
+                  description: tools/call 使用精确工具名称 name 和对象 arguments，保留 _meta 等扩展字段；tools/list 返回完整目录，不接受非空 cursor。
+              required:
+              - jsonrpc
+              - method
+      responses:
+        '200':
+          description: JSON-RPC 结果或协议错误
+          headers:
+            X-Billing-Transaction-ID:
+              schema:
+                type: string
+                format: uuid
+            X-Billing-Status:
+              schema:
+                type: string
+                enum:
+                - pending
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jsonrpc:
+                    const: '2.0'
+                  id:
+                    type:
+                    - string
+                    - number
+                    - 'null'
+                  result: {}
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: integer
+                      message:
+                        type: string
+                      data: {}
+                    required:
+                    - code
+                    - message
+                required:
+                - jsonrpc
+                - id
+        '202':
+          description: 已接收通知，响应体为空
+        '400':
+          description: 请求格式、参数或协议版本不合法
+        '401':
+          description: 调用密钥缺失、失效或没有 mcp:invoke 作用域
+        '402':
+          description: 积分不足
+        '403':
+          description: 请求来源、用户、会话或连接认证不允许调用
+        '404':
+          description: 连接不存在、已禁用或未获授权
+        '409':
+          description: 幂等键或交易状态冲突，不重复执行工具
+          headers:
+            X-Billing-Transaction-ID:
+              schema:
+                type: string
+                format: uuid
+        '413':
+          description: 请求体超过 1 MiB
+        '415':
+          description: 请求类型必须为 application/json
+        '502':
+          description: 上游连接或握手失败
+    get:
+      summary: 此无状态入口不提供 SSE 订阅
+      security:
+      - InvocationKey: []
+      responses:
+        '405':
+          description: 不支持此方法，Allow 为 POST
+        '401':
+          description: 调用密钥无效
+        '403':
+          description: 请求来源不允许
+    delete:
+      summary: 此无状态入口不维护下游 MCP 会话
+      security:
+      - InvocationKey: []
+      responses:
+        '405':
+          description: 不支持此方法，Allow 为 POST
+        '401':
+          description: 调用密钥无效
+        '403':
+          description: 请求来源不允许
+  /mcp/connectors/{id}/credentials/{credential_id}:
+    parameters:
+    - in: path
+      name: id
+      schema:
+        type: string
+        format: uuid
+      required: true
+    - in: header
+      name: MCP-Protocol-Version
+      description: 后续请求应携带握手协商的版本；未知版本返回 400。
+      schema:
+        type: string
+        enum:
+        - '2024-11-05'
+        - '2025-03-26'
+        - '2025-06-18'
+        - '2025-11-25'
+    - name: credential_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    post:
+      summary: 调用指定凭证的 MCP 网关
+      description: 使用全局 mcp:invoke API Key 认证用户；地址明确指定集中或独立凭证。每次请求校验用户的连接使用权、凭证与连接关系及当前状态，独立凭证必须属于调用用户。撤销的凭证地址不自动切换到新凭证。 tools/list
+        和 tools/call 使用上游原始工具名称，并执行实时工具启停检查。
+      security:
+      - InvocationKey: []
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          maxLength: 128
+      - in: header
+        name: X-Session-ID
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jsonrpc:
+                  const: '2.0'
+                id:
+                  type:
+                  - string
+                  - number
+                  description: 请求必须携带，通知省略；原值随响应返回。
+                method:
+                  type: string
+                  examples:
+                  - initialize
+                  - notifications/initialized
+                  - ping
+                  - tools/list
+                  - tools/call
+                params:
+                  type: object
+                  description: tools/call 使用精确工具名称 name 和对象 arguments，保留 _meta 等扩展字段；tools/list 返回完整目录，不接受非空 cursor。
+              required:
+              - jsonrpc
+              - method
+      responses:
+        '200':
+          description: JSON-RPC 结果或协议错误
+          headers:
+            X-Billing-Transaction-ID:
+              schema:
+                type: string
+                format: uuid
+            X-Billing-Status:
+              schema:
+                type: string
+                enum:
+                - pending
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jsonrpc:
+                    const: '2.0'
+                  id:
+                    type:
+                    - string
+                    - number
+                    - 'null'
+                  result: {}
+                  error:
+                    type: object
+                    properties:
+                      code:
+                        type: integer
+                      message:
+                        type: string
+                      data: {}
+                    required:
+                    - code
+                    - message
+                required:
+                - jsonrpc
+                - id
+        '202':
+          description: 已接收通知，响应体为空
+        '400':
+          description: 请求格式、参数或协议版本不合法
+        '401':
+          description: 调用密钥缺失、失效或没有 mcp:invoke 作用域
+        '402':
+          description: 积分不足
+        '403':
+          description: 请求来源、用户、会话或连接认证不允许调用
+        '404':
+          description: 连接不存在、已禁用或未获授权
+        '409':
+          description: 幂等键或交易状态冲突，不重复执行工具
+          headers:
+            X-Billing-Transaction-ID:
+              schema:
+                type: string
+                format: uuid
+        '413':
+          description: 请求体超过 1 MiB
+        '415':
+          description: 请求类型必须为 application/json
+        '502':
+          description: 上游连接或握手失败
+    get:
+      summary: 此无状态入口不提供 SSE 订阅
+      security:
+      - InvocationKey: []
+      responses:
+        '405':
+          description: 不支持此方法，Allow 为 POST
+        '401':
+          description: 调用密钥无效
+        '403':
+          description: 请求来源不允许
+    delete:
+      summary: 此无状态入口不维护下游 MCP 会话
+      security:
+      - InvocationKey: []
+      responses:
+        '405':
+          description: 不支持此方法，Allow 为 POST
+        '401':
+          description: 调用密钥无效
+        '403':
+          description: 请求来源不允许
+  /api/v1/groups:
+    get:
+      summary: 搜索可分享的分组
+      description: 按名称不区分大小写进行字面子串匹配，返回未删除分组及名称匹配的虚拟根组，不包含成员信息。根组名称来自 branding.workspace_name，匹配时优先返回且计入 limit。分享给父组可覆盖后代组成员；分享给根组覆盖系统全体用户，包括后续新增用户。
+      parameters:
+      - in: query
+        name: q
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 200}
+        description: 去除首尾空白后长度为 1—200 字节。
+      - in: query
+        name: limit
+        schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: 匹配的分组。
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SearchGroupsResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /api/v1/users:
+    get:
+      summary: 按用户名或邮箱查找分享接收用户
+      description: 不区分大小写的字面子串匹配，仅返回有效用户，排除当前用户。用户名对应用户的 name 字段。按名称和 ID 排序，最多返回 limit 项；结果过多时请细化关键词。
+      parameters:
+      - in: query
+        name: q
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description: 去除首尾空白后长度为 1—200 字节。
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      responses:
+        '200':
+          description: 匹配的用户简要信息。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchUsersResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/models/tags:
+    get:
+      summary: 列出当前用户可用模型配置的标签
+      responses:
+        '200':
+          description: 去重后的标签列表。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTagsResponse'
+  /api/v1/models:
+    get:
+      summary: 读取 Agent 模型目录
+      description: 仅包含启用的系统授权模型、自有模型和收到分享的模型，同时返回模型代理地址与鉴权方式。版本只覆盖模型目录和代理信息。
+      parameters:
+      - $ref: '#/components/parameters/IfNoneMatch'
+      - $ref: '#/components/parameters/AgentSearch'
+      - $ref: '#/components/parameters/AgentOwner'
+      - $ref: '#/components/parameters/AgentTagID'
+      - $ref: '#/components/parameters/AgentTagIDs'
+      - $ref: '#/components/parameters/AgentPage'
+      - $ref: '#/components/parameters/AgentPageSize'
+      responses:
+        '200':
+          description: 模型目录数据，不包含服务端密钥。
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentModelsResponse'
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      summary: 创建当前用户的个人模型
+      description: 所有者由登录身份确定。创建时 api_key 必填，积分倍率由服务端设为 1，初始仅本人可用。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserModelInput'
+      responses:
+        '201':
+          description: 创建成功，密钥原文不返回。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserModel'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+  /api/v1/models/{modelID}:
+    parameters:
+    - in: path
+      name: modelID
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      summary: 读取自己的模型以供编辑
+      description: 系统模型或他人模型均返回 404。已禁用的自有模型仍可读取。
+      responses:
+        '200':
+          description: 模型配置，不包含密钥原文。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserModel'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+    put:
+      summary: 修改自己的模型
+      description: 完整替换可编辑配置。api_key 省略或为空时保留原密钥；已有分享、启用状态和积分倍率保持不变。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserModelInput'
+      responses:
+        '200':
+          description: 修改成功。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserModel'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+    delete:
+      summary: 删除自己的模型
+      description: 软删除并在同一事务内清除分享授权，后续配置下发和代理调用立即不可用。
+      responses:
+        '204':
+          description: 删除成功，无响应体。
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+  /api/v1/resources/shares:
+    post:
+      summary: 批量分享自己的资源给指定用户或分组
+      description: 支持 model、rule、skill、connector、expert；个人规则共享后接收者可选择使用，但不能强制应用。个人 Connector 的接收方使用自己的独立凭证，个人专家的依赖仍需接收方获得使用授权。分享为追加的只读使用授权，不覆盖其他授权；重复授权不会产生重复记录。每批资源 1—100 项，用户与分组 ID 合计 1—100 项；任一资源非本人所有、任一接收用户无效或分组不存在时整批回滚。禁止直接分享给自己，不允许接收方转分享。组授权覆盖其后代组成员并随成员关系变化即时生效；全零 UUID 根组表示系统全员授权，包括后续新增用户。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareResourcesInput'
+      responses:
+        '204':
+          description: 整批分享成功，无响应体。
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+    delete:
+      summary: 批量撤销指定用户或分组的资源分享
+      description: 仅所有者可以撤销。只移除本批指定资源与用户或分组间的直接授权，不影响其他用户/分组的授权；不存在的授权视为成功，允许撤销已停用或已删除的接收对象。任一资源无权操作则整批回滚。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareResourcesInput'
+      responses:
+        '204':
+          description: 整批撤销成功，无响应体。
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+  /api/v1/settings:
+    get:
+      summary: 读取 Agent 设置
+      description: 只返回此类资源，独立计算版本；每次请求重新检查当前用户身份和资源权限。
+      parameters:
+      - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: 设置数据，不包含服务端密钥。
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSettingsResponse'
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/rules:
+    get:
+      summary: 读取 Agent 规则
+      description: 仅返回系统授权规则、当前用户创建及分享给当前用户的个人规则；共享的个人规则不能强制应用。独立计算版本，每次请求重新检查当前用户身份和资源权限。
+      parameters:
+      - $ref: '#/components/parameters/IfNoneMatch'
+      - $ref: '#/components/parameters/AgentSearch'
+      - $ref: '#/components/parameters/AgentOwner'
+      - $ref: '#/components/parameters/AgentPage'
+      - $ref: '#/components/parameters/AgentPageSize'
+      responses:
+        '200':
+          description: 规则数据，不包含服务端密钥。
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRulesResponse'
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      summary: 创建当前用户的个人规则
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRuleInput'
+      responses:
+        '201':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+      description: 归属固定为当前用户；个人规则可分享给指定用户使用，但仅创建者可读取详情、编辑、删除及管理分享。
+  /api/v1/skills/tags:
+    get:
+      summary: 列出当前用户可用技能配置的标签
+      responses:
+        '200':
+          description: 去重后的标签列表。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTagsResponse'
+  /api/v1/skills:
+    get:
+      summary: 读取 Agent 技能
+      description: 只返回此类资源，独立计算版本；每次请求重新检查当前用户身份和资源权限。
+      parameters:
+      - $ref: '#/components/parameters/IfNoneMatch'
+      - $ref: '#/components/parameters/AgentSearch'
+      - $ref: '#/components/parameters/AgentOwner'
+      - $ref: '#/components/parameters/AgentTagID'
+      - $ref: '#/components/parameters/AgentTagIDs'
+      - $ref: '#/components/parameters/AgentPage'
+      - $ref: '#/components/parameters/AgentPageSize'
+      responses:
+        '200':
+          description: 技能数据，不包含服务端密钥。
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSkillsResponse'
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      summary: 上传 ZIP 创建个人技能
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                package:
+                  type: string
+                  format: binary
+                  description: 最多 20 MiB ZIP，解包最多 50 MiB、500 个文件。
+                metadata:
+                  type: string
+                  description: 可选 JSON 对象字符串，仅 tag_ids 可写；名称、描述和包信息以服务端解析 SKILL.md 的结果为准。
+              required:
+              - package
+      responses:
+        '201':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+      description: 技能包最多 20 MiB，解包最多 50 MiB、500 个文件。归属固定为当前用户；初始启用，上传元数据不能配置授权、归属或存储路径。
+  /api/v1/experts/tags:
+    get:
+      summary: 列出当前用户可用专家配置的标签
+      responses:
+        '200':
+          description: 去重后的标签列表。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTagsResponse'
+  /api/v1/experts:
+    get:
+      summary: 读取 Agent 专家
+      description: 返回启用的系统授权专家、自有专家及收到分享的个人专家；包含归属与修订号，所有者可查看 shared_users。独立计算版本，每次请求重新检查身份和资源权限。
+      parameters:
+      - $ref: '#/components/parameters/IfNoneMatch'
+      - $ref: '#/components/parameters/AgentSearch'
+      - $ref: '#/components/parameters/AgentOwner'
+      - $ref: '#/components/parameters/AgentTagID'
+      - $ref: '#/components/parameters/AgentTagIDs'
+      - $ref: '#/components/parameters/AgentPage'
+      - $ref: '#/components/parameters/AgentPageSize'
+      responses:
+        '200':
+          description: 专家数据，不包含服务端密钥。
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentExpertsResponse'
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      summary: 创建当前用户的个人专家
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/UserExpertInput'
+              - required:
+                - prompt
+      responses:
+        '201':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpertResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+      description: 归属固定为当前用户，默认启用；仅允许关联自己可用的模型、规则、技能和连接。分享通过 /resources/shares 管理。
+  /api/v1/connectors/tags:
+    get:
+      summary: 列出当前用户可用连接器配置的标签
+      responses:
+        '200':
+          description: 去重后的标签列表。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTagsResponse'
+  /api/v1/connectors:
+    get:
+      summary: 读取 Agent 连接器
+      description: 只返回此类资源，独立计算版本；每次请求重新检查当前用户身份和资源权限。
+      parameters:
+      - $ref: '#/components/parameters/IfNoneMatch'
+      - $ref: '#/components/parameters/AgentSearch'
+      - $ref: '#/components/parameters/AgentOwner'
+      - $ref: '#/components/parameters/AgentTagID'
+      - $ref: '#/components/parameters/AgentTagIDs'
+      - $ref: '#/components/parameters/AgentPage'
+      - $ref: '#/components/parameters/AgentPageSize'
+      responses:
+        '200':
+          description: 连接器数据，不包含服务端密钥。
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentConnectorsResponse'
+        '304':
+          $ref: '#/components/responses/NotModified'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      summary: 创建当前用户的个人 Connector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/UserConnectorInput'
+              required:
+              - name
+              - url
+              - authorization_mode
+      responses:
+        '201':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+      description: 直接配置 Connector 地址、认证方式和 OAuth 应用，不使用 Provider。个人连接仅支持 none / independent，凭证通过独立接口管理。
+  /api/v1/api-keys:
+    get:
+      summary: 查询当前用户的调用密钥
+      responses:
+        '200':
+          description: 当前用户的调用密钥元数据列表，不包含密钥原文。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeysResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      summary: 创建调用密钥
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAPIKeyInput'
+      responses:
+        '201':
+          description: 创建成功；api_key 原文只在本次响应中返回。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedAPIKey'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/api-keys/{keyID}:
+    parameters:
+    - $ref: '#/components/parameters/KeyID'
+    delete:
+      summary: 撤销调用密钥
+      responses:
+        '204':
+          description: 撤销成功，无响应体。
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/api-keys/{keyID}/rotate:
+    parameters:
+    - $ref: '#/components/parameters/KeyID'
+    post:
+      summary: 轮换调用密钥
+      description: 创建同名、同权限的新密钥并撤销原密钥。
+      responses:
+        '201':
+          description: 轮换成功；api_key 原文只在本次响应中返回。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedAPIKey'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/connectors/{id}/icon:
+    get:
+      summary: 按用户权限读取连接图标
+      responses:
+        '200':
+          description: 按用户权限读取连接图标
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: 上传连接图标
+      responses:
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters:
+      - name: If-Match
+        in: header
+        required: true
+        description: 上次读取返回的 ETag，例如 "1"。
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                icon:
+                  type: string
+                  format: binary
+                  description: PNG/JPEG，最多 1 MiB，最多 4096×4096。
+              required:
+              - icon
+      description: 系统连接由管理员维护，个人连接由所有者维护；携带连接 If-Match。
+  /api/v1/experts/{id}/manifest:
+    get:
+      summary: 读取当前用户可用专家的完整清单
+      responses:
+        '200':
+          description: 读取当前用户可用专家的完整清单
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpertManifest'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+        '304':
+          description: ETag 未变化
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/v1/resources/resolve:
+    post:
+      summary: 解析专家、规则、技能与连接绑定
+      responses:
+        '200':
+          description: 解析专家、规则、技能与连接绑定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpertManifest'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveResources'
+  /api/v1/experts/{id}/skills/{skillID}/package:
+    get:
+      summary: 按专家委托下载技能包
+      responses:
+        '200':
+          description: 按专家委托下载技能包
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: skillID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: sha256
+        in: query
+        schema:
+          type: string
+        description: 客户端清单记录的包摘要；与当前包不同返回 412。
+  /api/v1/connectors/{id}/test:
+    post:
+      summary: 执行真实 MCP 握手与全量工具发现
+      description: 独立认证必须使用包含 credential_id 的接口，否则返回 400 credential_selection_required。连接级工具适用于 none / centralized；集中测试仅限管理员。
+      responses:
+        '200':
+          description: 执行真实 MCP 握手与全量工具发现
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connection_status:
+                    type: string
+                  tool_count:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/v1/connectors/{id}/tools:
+    get:
+      summary: 读取认证上下文的工具目录
+      responses:
+        '200':
+          description: 读取认证上下文的工具目录
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MCPTool'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      description: 独立认证必须使用包含 credential_id 的接口，否则返回 400 credential_selection_required。连接级工具适用于 none / centralized；集中测试仅限管理员。
+  /api/v1/connectors/{id}/oauth/authorizations:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    post:
+      summary: 添加命名 OAuth 凭证，每次成功新建
+      responses:
+        '200':
+          description: 成功；不返回凭证秘密。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthAuthorization'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizationName'
+  /api/v1/connector-authorizations/{id}:
+    get:
+      summary: 查询本人发起的授权事务状态
+      description: 保存凭证后自动测试连接并发现工具，测试尝试完成后返回 succeeded 和 credential_id；测试失败不影响授权成功，结果记录在凭证测试状态中。
+      responses:
+        '200':
+          description: 查询本人发起的授权事务状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationStatus'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/v1/skills/{id}/package:
+    get:
+      summary: 按当前权限下载技能包
+      responses:
+        '200':
+          description: 按当前权限下载技能包
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: sha256
+        in: query
+        schema:
+          type: string
+        description: 客户端清单记录的包摘要；与当前包不同返回 412。
+    put:
+      summary: 替换自己的个人技能 ZIP
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                package:
+                  type: string
+                  format: binary
+                  description: 最多 20 MiB ZIP，解包最多 50 MiB、500 个文件。
+                metadata:
+                  type: string
+                  description: 可选 JSON 对象字符串，仅 tag_ids 可写；名称、描述和包信息以服务端解析 SKILL.md 的结果为准。
+              required:
+              - package
+      responses:
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillResource'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+      description: 替换完整技能包，名称和描述以新 ZIP 的 SKILL.md 为准；保留既有分享和启用状态。
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+  /api/v1/experts/{id}:
+    get:
+      summary: 读取自己的个人专家
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpertResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+    put:
+      summary: 编辑自己的个人专家
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserExpertInput'
+      responses:
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpertResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+      description: name 必填。仅更新输入声明的业务字段；不能修改归属、启用状态或分享关系。必须携带最近详情响应的 ETag 作为 If-Match，分享变更也会递增 revision。
+    delete:
+      summary: 删除自己的个人专家
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204':
+          description: 资源已软删除，相关分享同步清理。
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+  /api/v1/rules/{id}:
+    get:
+      summary: 读取自己的个人规则
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+    put:
+      summary: 编辑自己的个人规则
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRuleInput'
+      responses:
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+      description: name、content 必填。仅创建者可修改规则名称和正文，不能修改归属或授权。必须携带最近详情响应的 ETag 作为 If-Match。
+    delete:
+      summary: 删除自己的个人规则
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204':
+          description: 个人规则已软删除。
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+  /api/v1/skills/{id}:
+    get:
+      summary: 读取自己的个人技能
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+    put:
+      summary: 编辑自己的个人技能
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSkillInput'
+      responses:
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+      description: name 必填。仅更新输入声明的业务字段；不能修改归属、启用状态或分享关系。必须携带最近详情响应的 ETag 作为 If-Match，分享变更也会递增 revision。 description、content
+        省略时保留原值；编辑后重写完整 ZIP，更新大小与摘要，保留附属文件。
+    delete:
+      summary: 删除自己的个人技能
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204':
+          description: 资源已软删除，相关分享同步清理。
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+  /api/v1/connectors/{id}:
+    get:
+      summary: 读取自己的个人 Connector
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+    put:
+      summary: 编辑自己的个人 Connector
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserConnectorInput'
+      responses:
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorResource'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+      description: 直接编辑连接，携带连接 If-Match。关键配置变更递增 config_revision 并使旧凭证、目录和授权事务失效；Client Secret 轮换不使既有 Token 失效。
+    delete:
+      summary: 删除自己的个人 Connector
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204':
+          description: 资源已软删除，相关分享同步清理。
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+  /api/v1/skills/{id}/manifest:
+    get:
+      summary: 读取自己的个人技能正文
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: 资源详情；仅资源所有者可编辑。
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSkillManifest'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+  /api/v1/connectors/{id}/credentials:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      summary: 列出当前用户的独立凭证
+      responses:
+        '200':
+          description: 成功；不返回凭证秘密。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConnectorCredential'
+                required:
+                - items
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+    post:
+      summary: 新增 HTTP Header 凭证并自动测试连接
+      description: 保存后由服务端自动发现工具并返回最新测试状态；测试失败仍保留凭证，可通过测试接口重试。
+      responses:
+        '201':
+          description: 成功；不返回凭证秘密。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorCredential'
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialInput'
+  /api/v1/connectors/{id}/credentials/{credential_id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    - name: credential_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      summary: 读取指定凭证元数据及 ETag
+      responses:
+        '200':
+          description: 成功；不返回凭证秘密。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorCredential'
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+    patch:
+      summary: 改名或整组替换 Header
+      description: 替换 Header 后自动测试连接并更新工具目录；仅改名不触发测试。
+      responses:
+        '200':
+          description: 成功；不返回凭证秘密。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorCredential'
+          headers:
+            ETag:
+              $ref: '#/components/headers/RevisionETag'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialPatch'
+      parameters:
+      - name: If-Match
+        in: header
+        required: true
+        schema:
+          type: string
+        description: 当前凭证 revision 的带双引号 ETag；冲突返回 412 revision_conflict。
+    delete:
+      summary: 本地撤销指定凭证并失效其工具目录
+      responses:
+        '204':
+          description: 操作成功。
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters:
+      - name: If-Match
+        in: header
+        required: true
+        schema:
+          type: string
+        description: 当前凭证 revision 的带双引号 ETag；冲突返回 412 revision_conflict。
+  /api/v1/connectors/{id}/credentials/{credential_id}/oauth/authorizations:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    - name: credential_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    post:
+      summary: 重新授权指定凭证，成功后保持 ID 并失效原目录
+      responses:
+        '200':
+          description: 成功；不返回凭证秘密。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthAuthorization'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters:
+      - name: If-Match
+        in: header
+        required: true
+        schema:
+          type: string
+        description: 当前凭证 revision 的带双引号 ETag；冲突返回 412 revision_conflict。
+  /api/v1/connectors/{id}/credentials/{credential_id}/test:
+    post:
+      summary: 执行真实 MCP 握手与全量工具发现
+      description: 操作明确指定的凭证上下文；校验连接、凭证、当前用户和配置版本。管理端工具只读上下文允许查看系统连接用户工具，不能代用户测试。
+      responses:
+        '200':
+          description: 执行真实 MCP 握手与全量工具发现
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connection_status:
+                    type: string
+                  tool_count:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters: []
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    - name: credential_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  /api/v1/connectors/{id}/credentials/{credential_id}/tools:
+    get:
+      summary: 读取认证上下文的工具目录
+      responses:
+        '200':
+          description: 读取认证上下文的工具目录
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MCPTool'
+        '400':
+          $ref: '#/components/responses/ResourceError400'
+        '401':
+          $ref: '#/components/responses/ResourceError401'
+        '403':
+          $ref: '#/components/responses/ResourceError403'
+        '404':
+          $ref: '#/components/responses/ResourceError404'
+        '409':
+          $ref: '#/components/responses/ResourceError409'
+        '412':
+          $ref: '#/components/responses/ResourceError412'
+        '428':
+          $ref: '#/components/responses/ResourceError428'
+        '500':
+          $ref: '#/components/responses/ResourceError500'
+        '502':
+          $ref: '#/components/responses/ResourceError502'
+      parameters: []
+      description: 操作明确指定的凭证上下文；校验连接、凭证、当前用户和配置版本。管理端工具只读上下文允许查看系统连接用户工具，不能代用户测试。
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    - name: credential_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  /v1/images/inputs:
+    post:
+      summary: 上传当前用户的生图参考图片
+      description: 调用密钥需要 model:invoke 权限；仅接受一张不超过 16 MiB 的 PNG/JPEG。
+      security: [{ModelInvocationKey: []}, {ModelApiKey: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+      responses:
+        '201':
+          description: 用户专属文件，24 小时内可用于生图任务
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImageInputFile'}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /v1/images/generations:
+    post:
+      summary: 创建生图任务
+      description: 原生异步接口，返回任务 ID；不与 OpenAI Images 同路径同步语义兼容。
+      security: [{ModelInvocationKey: []}, {ModelApiKey: []}]
+      parameters:
+        - {name: Idempotency-Key, in: header, schema: {type: string, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ImageGenerateInput'}
+      responses:
+        '202':
+          description: 任务已受理，客户端用任务 ID 查询结果
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImageTask'}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/ResourceError409'}
+  /v1/images/edits:
+    post:
+      summary: 创建图片编辑任务
+      description: 仅模型原生支持编辑时开放；images 引用此前上传的原图。
+      security: [{ModelInvocationKey: []}, {ModelApiKey: []}]
+      parameters:
+        - {name: Idempotency-Key, in: header, schema: {type: string, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ImageEditInput'}
+      responses:
+        '202':
+          description: 编辑任务已受理
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImageTask'}
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/ResourceError409'}
+  /v1/images/tasks/{id}:
+    get:
+      summary: 查询当前用户的生图任务
+      description: 返回本地任务状态、图片访问地址与用量；结果图片到期后返回 expired 状态。
+      security: [{ModelInvocationKey: []}, {ModelApiKey: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200':
+          description: 当前用户的任务
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImageTask'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/ResourceError404'}
+  /v1/images/outputs/{id}:
+    get:
+      summary: 下载当前用户的生图结果
+      description: 需要调用密钥；图片到期或不属于当前用户时返回 404。
+      security: [{ModelInvocationKey: []}, {ModelApiKey: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200':
+          description: 生图内容，仅返回 PNG、JPEG 或 WebP
+          content:
+            image/png: {schema: {type: string, format: binary}}
+            image/jpeg: {schema: {type: string, format: binary}}
+            image/webp: {schema: {type: string, format: binary}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/ResourceError404'}
+  /api/v1/feedback:
+    post:
+      summary: 提交用户反馈
+      description: >-
+        使用 Agent OAuth access token 提交文字反馈和可选截图。请求使用 multipart/form-data，最多上传 3 张
+        PNG、JPEG 或 WebP 图片，单张最多 5 MiB，总请求最多 16 MiB。content 和 images 至少提供一项。
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: 建议客户端为可重试请求提供；同一用户相同 Key 和请求内容只创建一条反馈。
+          schema: {type: string, maxLength: 128}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FeedbackMultipartInput'
+      responses:
+        '201':
+          description: 反馈已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackSubmission'
+        '200':
+          description: 幂等键命中已有反馈
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackSubmission'
+        '400': {$ref: '#/components/responses/ResourceError400'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/ResourceError409'}
+        '500': {$ref: '#/components/responses/ResourceError500'}
+components:
+  securitySchemes:
+    ModelInvocationKey:
+      type: http
+      scheme: bearer
+      description: 带 model:invoke 权限的长期调用密钥。
+    ModelApiKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: 同一调用密钥，优先于 Authorization Bearer。
+    InvocationKey:
+      type: http
+      scheme: bearer
+      description: 含 mcp:invoke 的长期调用密钥。
+    OAuthAccessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: OAuth 2.0 access token
+      description: Agent 登录授权流程签发的短期 access token。
+  parameters:
+    EndpointMachine:
+      name: machine_id
+      in: path
+      required: true
+      description: 规范小写、带连字符的 UUIDv4，仅限当前用户端点
+      schema: {type: string, format: uuid}
+    ResourceID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: 最近详情响应中的修订号 ETag，例如 "1"；缺省返回 428，已过期返回 412。
+      schema:
+        type: string
+    IfNoneMatch:
+      in: header
+      name: If-None-Match
+      description: 此接口上一次响应的 ETag；当前用户可见内容未变化时返回 304。
+      schema:
+        type: string
+    AgentSearch:
+      name: q
+      in: query
+      description: 按名称或描述做不区分大小写的包含匹配；模型与规则没有描述字段，仅匹配名称。与 owner、标签组合后再分页，total_count 为筛选后的总数。
+      schema: {type: string}
+    AgentOwner:
+      name: owner
+      in: query
+      description: 资源归属筛选。team 为系统资源；mine 为本人创建的个人资源；shared 为其他用户分享给当前用户的个人资源。
+      schema: {type: string, enum: [all, team, mine, shared], default: all}
+    AgentTagID:
+      name: tag_id
+      in: query
+      description: 单标签筛选，兼容旧调用；与 tag_ids 同时传入时匹配任一标签。
+      schema: {type: string, format: uuid}
+    AgentTagIDs:
+      name: tag_ids
+      in: query
+      style: form
+      explode: true
+      description: 多标签筛选，可重复传入或以逗号分隔；匹配任一标签（OR），不重复返回资源，total_count 为筛选后总数。
+      schema:
+        type: array
+        items: {type: string, format: uuid}
+    AgentPage:
+      name: page
+      in: query
+      schema: {type: integer, minimum: 1, default: 1, maximum: 1000000}
+    AgentPageSize:
+      name: page_size
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    KeyID:
+      in: path
+      name: keyID
+      required: true
+      description: 调用密钥 UUID。
+      schema:
+        type: string
+        format: uuid
+  headers:
+    RevisionETag:
+      description: 资源修订号，以双引号包围，例如 "1"；创建、编辑、分享、撤销分享及删除都会更新修订号。
+      schema:
+        type: string
+    ETag:
+      description: 当前接口响应内容的稳定 SHA-256 版本，以双引号包围。
+      schema:
+        type: string
+    CacheControl:
+      description: 按用户隔离缓存，每次使用前重新验证。
+      schema:
+        type: string
+        const: private, no-cache
+  responses:
+    EndpointResult:
+      description: 当前端点资料，时间为 Unix 毫秒
+      headers:
+        Cache-Control: {schema: {type: string, const: 'private, no-store'}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Endpoint'}
+    EndpointUnavailable:
+      description: 认证或存储暂不可用、连接数超限，或服务正在停止
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ResourceError'}
+    NotModified:
+      description: 当前接口内容未变化，无响应体。
+      headers:
+        ETag:
+          $ref: '#/components/headers/ETag'
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+    ResourceError400:
+      description: 字段或关联无效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResourceError'
+    ResourceError401:
+      description: 需要登录
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResourceError'
+    ResourceError403:
+      description: 无权操作
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResourceError'
+    ResourceError404:
+      description: 资源不存在或无权访问
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResourceError'
+    ResourceError409:
+      description: 名称或引用冲突
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResourceError'
+    ResourceError412:
+      description: 修订或技能包摘要已变化
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResourceError'
+    ResourceError428:
+      description: 缺少 If-Match
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResourceError'
+    ResourceError500:
+      description: 读取或保存失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResourceError'
+    ResourceError502:
+      description: 上游连接失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResourceError'
+    BadRequest:
+      description: 请求参数或请求体无效。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: 缺少 access token，或 token 无效、已过期。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: 指定资源不存在或不属于当前用户。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: 服务内部错误。
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    FeedbackMultipartInput:
+      type: object
+      additionalProperties: false
+      required: [category]
+      properties:
+        category:
+          type: string
+          enum: [bug, feature, experience, other]
+        content:
+          type: string
+          maxLength: 5000
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        platform:
+          type: string
+          enum: [desktop, mobile, web, other]
+          default: other
+        client_version:
+          type: string
+          maxLength: 64
+        images:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            format: binary
+          description: PNG、JPEG 或 WebP 图片；单张最多 5 MiB。
+    FeedbackSubmission:
+      type: object
+      additionalProperties: false
+      required: [id, created_at, attachments]
+      properties:
+        id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeedbackAttachment'
+    FeedbackAttachment:
+      type: object
+      additionalProperties: false
+      required: [id, mime_type, byte_size, width, height, downloadable]
+      properties:
+        id: {type: string, format: uuid}
+        mime_type:
+          type: string
+          enum: [image/png, image/jpeg, image/webp]
+        byte_size: {type: integer, format: int64, minimum: 1}
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+        downloadable: {type: boolean}
+    Endpoint:
+      type: object
+      required: [machine_id, device_name, alias, display_name, platform, os_version, arch, client_version, protocol_version, status, online, created_at, updated_at, last_seen_at, revoked_at]
+      properties:
+        machine_id: {type: string, format: uuid}
+        device_name: {type: string}
+        alias: {type: [string, 'null']}
+        display_name: {type: string}
+        platform: {type: string, enum: [macos, windows, linux, ios, android]}
+        os_version: {type: string}
+        arch: {type: string}
+        client_version: {type: string}
+        protocol_version: {type: integer, const: 1}
+        status: {type: string, enum: [active, revoked]}
+        online: {type: boolean}
+        created_at: {type: integer, format: int64}
+        updated_at: {type: integer, format: int64}
+        last_seen_at: {type: [integer, 'null'], format: int64}
+        revoked_at: {type: [integer, 'null'], format: int64}
+    UserRuleInput:
+      type: object
+      properties:
+        content:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+      required:
+      - name
+      - content
+      description: 仅声明的字段可由当前用户写入；归属、启用状态、授权和其他服务端字段忽略。
+    UserSkillInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          description: 省略时保留原值。
+        content:
+          type: string
+          description: 省略时保留原值。
+        tag_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+      required:
+      - name
+      description: 仅声明的字段可由当前用户写入；归属、启用状态、授权和其他服务端字段忽略。
+    UserExpertInput:
+      type: object
+      properties:
+        tag_ids:
+          type: array
+          items: {type: string, format: uuid}
+        description:
+          type: string
+        prompt:
+          type: string
+        rule_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        skill_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorDependency'
+      required:
+      - name
+    UserConnectorInput:
+      type: object
+      properties:
+        tag_ids:
+          type: array
+          items: {type: string, format: uuid}
+        description:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        url:
+          type: string
+          format: uri
+        authorization_mode:
+          type: string
+          enum:
+          - none
+          - independent
+        authorization_method:
+          type:
+          - string
+          - 'null'
+          enum:
+          - oauth
+          - http_header
+          - null
+        oauth_config:
+          $ref: '#/components/schemas/OAuthConnectionConfig'
+        oauth_client_secret:
+          type: string
+          writeOnly: true
+          description: 省略保留，空字符串清空；应用或端点变更时省略会清除旧 Secret。
+      required:
+      - name
+      description: 仅声明的字段可由当前用户写入；归属、启用状态、授权和其他服务端字段忽略。
+    UserSkillManifest:
+      type: object
+      required:
+      - name
+      - description
+      - content
+      - revision
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        content:
+          type: string
+        revision:
+          type: integer
+    EmailAuthError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+    EmailLoginMethods:
+      type: object
+      required:
+        - password_enabled
+        - email_code_enabled
+        - email_code_auto_registration_enabled
+      properties:
+        password_enabled:
+          type: boolean
+          description: 密码登录开关，未配置时默认 true，同时约束管理员和普通用户。
+        email_code_enabled:
+          type: boolean
+          description: 验证码登录开关，默认 false。
+        email_code_auto_registration_enabled:
+          type: boolean
+          description: 邮箱验证码自动注册开关，默认 false；开启后新邮箱通过验证码登录时自动创建普通账号。
+    EmailAuthUser:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - role
+        - status
+        - joined_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: 邮箱会去除首尾空白并转为小写。
+        role:
+          type: string
+          enum:
+            - admin
+            - user
+        status:
+          type: string
+          enum:
+            - active
+            - disabled
+        joined_at:
+          type: string
+          format: date-time
+        avatar_url:
+          type: string
+        last_login_at:
+          type: string
+          format: date-time
+    CreditAmount:
+      type: string
+      pattern: ^-?\d+(\.\d{1,6})?$
+      description: 十进制定点积分，最多六位小数。
+    CreditAccount:
+      type: object
+      properties:
+        version:
+          type: string
+          description: 当前账户的版本，随账本变更更新；用于管理员调整时检查并发及重复提交，历史账户条目可省略。
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        group_id:
+          type: string
+          format: uuid
+        period_start_at:
+          type: string
+          format: date-time
+        period_end_at:
+          type: string
+          format: date-time
+        balance:
+          $ref: '#/components/schemas/CreditAmount'
+        frozen:
+          $ref: '#/components/schemas/CreditAmount'
+          description: 兼容字段，迁移后为零。
+        available:
+          $ref: '#/components/schemas/CreditAmount'
+        quota:
+          $ref: '#/components/schemas/CreditAmount'
+      required:
+      - id
+      - user_id
+      - balance
+      - frozen
+      - available
+      - quota
+      - period_start_at
+      - period_end_at
+    CreditEntriesResponse:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreditConsumptionEntry'
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+        page_size:
+          type: integer
+    CreditConsumptionEntry:
+      type: object
+      additionalProperties: false
+      required: [id, transaction_id, entry_type, category, item_name, credit_delta, balance_after, mode, occurred_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        transaction_id:
+          type: [string, 'null']
+          format: uuid
+        entry_type:
+          type: string
+          enum: [charge, refund]
+        category:
+          type: string
+          enum: [model, tool, other]
+        item_name:
+          type: string
+        credit_delta:
+          $ref: '#/components/schemas/CreditAmount'
+          description: 本条积分变动，扣费为负、退款为正。
+        balance_after:
+          $ref: '#/components/schemas/CreditAmount'
+          description: 本条发生后对应周期账户的余额，可能为负数。
+        mode:
+          type: string
+          enum: [local, remote]
+        occurred_at:
+          type: string
+          format: date-time
+    UserSummary:
+      type: object
+      required:
+      - id
+      - name
+      - email
+      properties:
+        id: &id006
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: 用户名。
+        email:
+          type: string
+          format: email
+    GroupSummary:
+      type: object
+      required: [id, name, parent_id]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        parent_id:
+          type: [string, 'null']
+          format: uuid
+          description: 顶层分组的父 ID 为全零 UUID 的虚拟根组 ID；根组自身为 null，可作为全员分享对象。
+    SearchGroupsResponse:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items: {$ref: '#/components/schemas/GroupSummary'}
+    SearchUsersResponse:
+      type: object
+      required:
+      - users
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSummary'
+    AgentTagsResponse:
+      type: object
+      required: [version, tags]
+      properties:
+        version:
+          $ref: '#/components/schemas/ResourceVersion'
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceTag'
+    AgentModelsResponse:
+      type: object
+      required:
+      - version
+      - models
+      - model_gateway
+      - total_count
+      - page
+      - page_size
+      additionalProperties: false
+      properties:
+        version:
+          $ref: '#/components/schemas/ResourceVersion'
+        total_count: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1}
+        models:
+          type: array
+          description: 当前用户可用的资源，空集合返回 []。
+          items:
+            $ref: '#/components/schemas/AgentModel'
+        model_gateway:
+          $ref: '#/components/schemas/ModelGateway'
+    UserModelInput:
+      type: object
+      required:
+      - model_id
+      - display_name
+      - protocol
+      - base_url
+      properties:
+        model_id: &id001
+          type: string
+          description: 上游模型名称，非代理调用时的内部模型 ID。
+        display_name: &id002
+          type: string
+          description: 展示名称。
+        protocol: &id003
+          type: string
+          enum:
+          - openai_chat_completions
+          - openai_responses
+          - anthropic
+          - image_generation
+        kind:
+          type: string
+          enum: [text, image]
+          default: text
+        provider:
+          type: string
+          enum: [passthrough, openai_images, openai_responses_image, volcengine, xai]
+        image_config:
+          $ref: '#/components/schemas/AgentImageConfig'
+        base_url: &id004
+          type: string
+          format: uri
+          description: 上游 HTTP(S) 地址，不允许包含用户名密码。
+        api_key:
+          type: string
+          writeOnly: true
+          description: 上游密钥，仅写入；更新时省略或为空表示保留。
+        tag_ids:
+          type: array
+          items: {type: string, format: uuid}
+        advanced_config: &id005
+          type: object
+          required:
+          - context_window_tokens
+          - max_output_tokens
+          - supports_vision
+          properties:
+            context_window_tokens:
+              type: integer
+              format: int64
+              minimum: 0
+            max_output_tokens:
+              type: integer
+              format: int64
+              minimum: 0
+            supports_vision:
+              type: boolean
+            supports_reasoning:
+              type: boolean
+              default: false
+    CreateUserModelInput:
+      allOf:
+      - $ref: '#/components/schemas/UserModelInput'
+      - type: object
+        required:
+        - api_key
+        properties:
+          api_key:
+            type: string
+            minLength: 1
+            writeOnly: true
+    UserModel:
+      type: object
+      required:
+      - id
+      - ownership_type
+      - user
+      - model_id
+      - display_name
+      - protocol
+      - kind
+      - provider
+      - base_url
+      - api_key_configured
+      - credit_multiplier
+      - authorization
+      - enabled
+      - created_at
+      - updated_at
+      properties:
+        model_id: *id001
+        display_name: *id002
+        protocol: *id003
+        kind:
+          type: string
+          enum: [text, image]
+        provider:
+          type: string
+          enum: [passthrough, openai_images, openai_responses_image, volcengine, xai]
+        image_config:
+          $ref: '#/components/schemas/AgentImageConfig'
+        image_pricing:
+          $ref: '#/components/schemas/AgentImagePricing'
+        base_url: *id004
+        advanced_config: *id005
+        id: *id006
+        ownership_type:
+          type: string
+          const: user
+        user:
+          $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+          description: 资源所有者的基本信息；系统资源返回创建者，分享不改变归属。
+        api_key_configured:
+          type: boolean
+        tags:
+          type: array
+          items: {$ref: '#/components/schemas/ResourceTag'}
+        credit_multiplier:
+          type: number
+          exclusiveMinimum: 0
+          description: 服务端管理，用户不可修改。
+        shared_groups:
+          type: array
+          readOnly: true
+          items: {$ref: '#/components/schemas/GroupSummary'}
+          description: 当前所有者直接分享的分组，未分享时为空数组。
+        authorization:
+          type: object
+          required:
+          - user_ids
+          - group_ids
+          properties:
+            user_ids:
+              type: array
+              items: *id006
+            group_ids:
+              type: array
+              items: *id006
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ShareResourcesInput:
+      type: object
+      description: user_ids 与 group_ids 至少填写一项，原始数组合计最多 100 项；重复项去重。group_ids 中的全零 UUID 根组表示系统全员授权，包括后续新增用户；撤销根组分享只移除全员授权，保留独立的用户及其他分组授权。
+      required:
+      - resources
+      properties:
+        resources:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required:
+            - type
+            - id
+            properties:
+              type:
+                type: string
+                enum:
+                - model
+                - rule
+                - skill
+                - connector
+                - expert
+                description: 可分享的个人资源类型；其他类型返回 400。
+              id: *id006
+        user_ids:
+          type: array
+          maxItems: 100
+          items: *id006
+          description: 接收用户 ID，重复项自动去重。
+        group_ids:
+          type: array
+          maxItems: 100
+          items: *id006
+          description: 接收分组 ID，重复项自动去重；全零 UUID 表示系统全员授权，不展开成员。
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/Error"
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: 供调用方识别错误类别的稳定代码。
+          examples: [api_key_error]
+        message:
+          type: string
+          description: 面向用户或开发者的错误说明。
+    ResourceVersion:
+      type: string
+      pattern: ^sha256:[0-9a-f]{64}$
+      description: 当前接口实际下发内容的 SHA-256 摘要，不包含 version 字段。
+    AgentSettingsResponse:
+      type: object
+      required:
+      - version
+      - settings
+      additionalProperties: false
+      properties:
+        version:
+          $ref: '#/components/schemas/ResourceVersion'
+        settings:
+          $ref: '#/components/schemas/AgentSettings'
+    AgentRulesResponse:
+      type: object
+      required:
+      - version
+      - rules
+      - total_count
+      - page
+      - page_size
+      additionalProperties: false
+      properties:
+        version:
+          $ref: '#/components/schemas/ResourceVersion'
+        total_count: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1}
+        rules:
+          type: array
+          description: 当前用户可用的资源，空集合返回 []。
+          items:
+            $ref: '#/components/schemas/AgentRule'
+    AgentSkillsResponse:
+      type: object
+      required:
+      - version
+      - skills
+      - total_count
+      - page
+      - page_size
+      additionalProperties: false
+      properties:
+        version:
+          $ref: '#/components/schemas/ResourceVersion'
+        total_count: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1}
+        skills:
+          type: array
+          description: 当前用户可用的资源，空集合返回 []。
+          items:
+            $ref: '#/components/schemas/AgentSkill'
+    AgentExpertsResponse:
+      type: object
+      required:
+      - version
+      - experts
+      - total_count
+      - page
+      - page_size
+      additionalProperties: false
+      properties:
+        version:
+          $ref: '#/components/schemas/ResourceVersion'
+        total_count: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1}
+        experts:
+          type: array
+          description: 当前用户可用的资源，空集合返回 []。
+          items:
+            $ref: '#/components/schemas/AgentExpert'
+    AgentConnectorsResponse:
+      type: object
+      required:
+      - version
+      - connectors
+      - total_count
+      - page
+      - page_size
+      additionalProperties: false
+      properties:
+        version:
+          $ref: '#/components/schemas/ResourceVersion'
+        total_count: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1}
+        connectors:
+          type: array
+          description: 当前用户可用的资源，空集合返回 []。
+          items:
+            $ref: '#/components/schemas/AgentConnector'
+    AgentSettings:
+      type: object
+      description: 按设置域组织的全局设置；只返回已配置的设置域，服务端密钥字段已移除。
+      properties:
+        branding:
+          $ref: "#/components/schemas/BrandingSettings"
+        authentication:
+          $ref: "#/components/schemas/AuthenticationSettings"
+        email:
+          $ref: "#/components/schemas/EmailSettings"
+        billing:
+          $ref: "#/components/schemas/BillingSettings"
+      additionalProperties:
+        type: object
+        description: 后续新增设置域的配置对象。
+    BrandingSettings:
+      type: object
+      required: [workspace_name, product_name]
+      properties:
+        workspace_name:
+          type: string
+          description: 工作区名称。
+        product_name:
+          type: string
+          description: Agent 向用户展示的产品名称。
+      additionalProperties: true
+    AuthenticationSettings:
+      type: object
+      properties:
+        email_code_auto_registration_enabled:
+          type: boolean
+          description: 邮箱验证码登录遇到不存在的用户时是否自动创建普通账号；未配置时默认 false。
+        password_enabled:
+          type: boolean
+          description: 是否允许密码登录。
+        email_code_enabled:
+          type: boolean
+          description: 是否允许邮箱验证码登录。
+        oauth_connections:
+          type: array
+          description: 已配置的 OAuth 登录连接；不包含 client_secret。
+          items:
+            $ref: "#/components/schemas/OAuthConnection"
+      additionalProperties: true
+    OAuthConnection:
+      type: object
+      required: [id, provider, name, client_id, enabled]
+      properties:
+        id:
+          type: string
+          description: OAuth 连接的稳定标识。
+        provider:
+          type: string
+          enum: [github, google, microsoft, gitlab, oidc, baizhiyun]
+          description: OAuth 或 OIDC 提供方。
+        name:
+          type: string
+          description: 登录界面展示的连接名称。
+        client_id:
+          type: string
+          description: OAuth Client ID。
+        issuer_url:
+          type: string
+          format: uri
+          description: OIDC Issuer URL；oidc 和 baizhiyun 必填，其他连接可不返回。
+        authorization_url:
+          type: string
+          format: uri
+          description: 自定义授权端点；使用提供方默认端点时可不返回。
+        token_url:
+          type: string
+          format: uri
+          description: 自定义 Token 端点；使用提供方默认端点时可不返回。
+        userinfo_url:
+          type: string
+          format: uri
+          description: 自定义用户信息端点；使用提供方默认端点时可不返回。
+        scopes:
+          type: array
+          description: 请求上游授权时使用的 Scope；使用默认 Scope 时可不返回。百智云默认为 auth_certification、openid、phone、user、email。
+          items:
+            type: string
+        enabled:
+          type: boolean
+          description: 此登录连接是否启用。
+        auto_registration_enabled:
+          type: boolean
+          default: true
+          description: 通过此连接登录且用户不存在时是否自动创建普通账号；未配置时默认 true。
+      additionalProperties: true
+    EmailSettings:
+      type: object
+      properties:
+        sender_name:
+          type: string
+          description: 邮件发件人名称。
+        sender_email:
+          type: string
+          format: email
+          description: 邮件发件人地址。
+        smtp_host:
+          type: string
+          description: SMTP 服务器主机名。
+        smtp_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: SMTP 服务器端口。
+        smtp_username:
+          type: string
+          description: SMTP 登录用户名。
+        smtp_encryption:
+          type: string
+          enum: [none, starttls, tls]
+          description: SMTP 连接加密方式。
+      additionalProperties: true
+    BillingSettings:
+      type: object
+      properties:
+        input_credits_per_million_tokens:
+          $ref: '#/components/schemas/CreditAmount'
+          description: 每百万输入 Token 消耗的积分。
+        cached_input_credits_per_million_tokens:
+          $ref: '#/components/schemas/CreditAmount'
+          description: 每百万缓存输入 Token 消耗的积分。
+        output_credits_per_million_tokens:
+          $ref: '#/components/schemas/CreditAmount'
+          description: 每百万输出 Token 消耗的积分。
+        quota_refresh_cycle:
+          type: string
+          enum:
+          - daily
+          - weekly
+          - monthly
+          description: 积分额度刷新周期。
+        charging_mode:
+          description: local 为本地扣费；remote 为百智云扣费，仅具有有效百智云登录身份的用户可访问系统资源，用户自建资源仍遵循原授权。
+          type: string
+          enum:
+          - local
+          - remote
+        enabled:
+          type: boolean
+          description: 是否启用计费。
+      additionalProperties: false
+    ModelGateway:
+      type: object
+      required: [base_url, authentication]
+      properties:
+        base_url:
+          type: string
+          format: uri
+          description: 兼容模型 SDK 的代理 Base URL。
+        authentication:
+          type: string
+          enum: [api_key]
+          description: 模型代理使用用户创建的调用密钥鉴权。
+    ImageInputFile:
+      type: object
+      required: [file_id, mime_type, width, height, expires_at]
+      properties:
+        file_id: {type: string, format: uuid}
+        mime_type: {type: string}
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+        expires_at: {type: string, format: date-time}
+    ImageReference:
+      type: object
+      required: [file_id]
+      properties:
+        file_id: {type: string, format: uuid}
+    ImageGenerateInput:
+      type: object
+      additionalProperties: false
+      required: [model, prompt]
+      properties:
+        model: {type: string}
+        prompt: {type: string, minLength: 1}
+        reference_images:
+          type: array
+          items: {$ref: '#/components/schemas/ImageReference'}
+        quality: {$ref: '#/components/schemas/ImageQuality'}
+        aspect_ratio: {type: string, description: '模型目录公布的比例，如 1:1、9:16。'}
+        count: {type: integer, minimum: 1}
+    ImageEditInput:
+      type: object
+      additionalProperties: false
+      required: [model, prompt, images]
+      properties:
+        model: {type: string}
+        prompt: {type: string, minLength: 1}
+        images:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/ImageReference'}
+        mask: {$ref: '#/components/schemas/ImageReference'}
+        quality: {$ref: '#/components/schemas/ImageQuality'}
+        aspect_ratio: {type: string}
+        count: {type: integer, minimum: 1}
+    ImageTask:
+      type: object
+      required: [id, operation, status]
+      properties:
+        id: {type: string, format: uuid}
+        operation: {type: string, enum: [generate, edit]}
+        status: {type: string, enum: [pending, running, succeeded, failed, unknown, expired]}
+        outputs:
+          type: array
+          items:
+            type: object
+            required: [url, mime_type, width, height]
+            properties:
+              url: {type: string, description: 相对路径；下载时需要同一调用密钥。}
+              mime_type: {type: string}
+              width: {type: integer, minimum: 1}
+              height: {type: integer, minimum: 1}
+        usage:
+          type: object
+          properties:
+            requested_images: {type: integer, minimum: 0}
+            generated_images: {type: integer, minimum: 0}
+            credits: {type: string, description: 最终结算积分，完成后提供。}
+    ImageQuality:
+      type: string
+      enum: [1K, 2K, 4K]
+      description: 平台统一的生图画质档位；具体像素由供应商适配器映射。
+    AgentImageConfig:
+      type: object
+      required: [qualities, aspect_ratios, default_quality, default_aspect_ratio]
+      properties:
+        qualities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/ImageQuality'}
+        aspect_ratios:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string}
+        default_quality: {$ref: '#/components/schemas/ImageQuality'}
+        default_aspect_ratio: {type: string}
+        operations:
+          type: array
+          readOnly: true
+          items: {type: string, enum: [generate, edit]}
+        max_images: {type: integer, minimum: 1, readOnly: true}
+        max_reference_images: {type: integer, minimum: 0, readOnly: true}
+        supports_reference_image: {type: boolean, readOnly: true}
+        supports_mask: {type: boolean, readOnly: true}
+        allowed_aspect_ratios:
+          type: object
+          readOnly: true
+          additionalProperties: {type: array, items: {type: string}}
+    AgentImageMultiplier:
+      type: object
+      required: [name, multiplier]
+      properties:
+        name: {$ref: '#/components/schemas/ImageQuality'}
+        multiplier:
+          type: string
+          description: 大于 0 的十进制倍率，最多 6 位小数。
+    AgentImagePricing:
+      type: object
+      required: [base_credits_per_image]
+      properties:
+        base_credits_per_image: {type: string}
+        quality_multipliers:
+          type: array
+          items: {$ref: '#/components/schemas/AgentImageMultiplier'}
+    AgentModel:
+      type: object
+      required:
+        - ownership_type
+        - user
+        - id
+        - model
+        - display_name
+        - protocol
+        - kind
+        - credit_multiplier
+      properties:
+        ownership_type:
+          type: string
+          enum:
+          - system
+          - user
+          description: 资源归属，固定为 system 或 user；分享不会改变此值。自有和他人分享的个人模型均为 user，通过 user.id 与当前用户 ID 比较区分。
+        user:
+          $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+          description: 资源所有者的基本信息；系统资源返回创建者，分享不改变归属。
+        creator:
+          $ref: '#/components/schemas/UserSummary'
+          description: 他人创建的用户模型返回创建者；自己的模型和系统模型不返回。
+        shared_groups:
+          type: array
+          readOnly: true
+          items: {$ref: '#/components/schemas/GroupSummary'}
+          description: 仅资源所有者可见的直接分享分组，未分享时为空数组；不展开成员。
+        shared_users:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSummary'
+          description: 仅自己的用户模型返回分享用户列表，未分享时为空数组，排除已删除用户。接收方和系统模型不返回此字段。
+        id:
+          type: string
+          format: uuid
+          description: MonkeyAI 内部模型 UUID，模型代理兼容使用该值作为请求的 model。
+        model:
+          type: string
+          description: 格式为 model_id@id，由数据库 models.model_id 与内部模型 UUID 拼接；Agent 调用模型代理时将此值作为请求的 model，代理精确定位配置并转换为上游模型名称。
+        display_name:
+          type: string
+          description: Agent 向用户展示的模型名称。
+        protocol:
+          type: string
+          enum: [openai_chat_completions, openai_responses, anthropic, image_generation]
+          description: MonkeyAI 与上游服务通信时使用的协议。
+        kind:
+          type: string
+          enum: [text, image]
+        image_config:
+          $ref: '#/components/schemas/AgentImageConfig'
+        image_pricing:
+          $ref: '#/components/schemas/AgentImagePricing'
+        context_window_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 文本模型必须大于 0；生图模型为 0。
+        max_output_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 文本模型必须大于 0；生图模型为 0。
+        supports_vision:
+          type: boolean
+          description: 模型是否支持图像输入。
+        supports_reasoning:
+          type: boolean
+          description: 模型是否支持推理能力。
+        credit_multiplier:
+          type: number
+          exclusiveMinimum: 0
+          description: 本模型消耗积分时使用的倍率。
+        tags:
+          type: array
+          items: {$ref: '#/components/schemas/ResourceTag'}
+    APIKeysResponse:
+      type: object
+      required: [api_keys]
+      properties:
+        api_keys:
+          type: array
+          description: 当前用户的调用密钥元数据，不包含可用于鉴权的密钥原文。
+          items:
+            $ref: "#/components/schemas/APIKey"
+    CreateAPIKeyInput:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: 便于用户识别密钥用途的名称。
+        scopes:
+          type: array
+          description: 调用权限；不传或传空数组时默认为 model:invoke。
+          default:
+          - model:invoke
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - model:invoke
+            - mcp:invoke
+        expires_in_days:
+          type: integer
+          minimum: 1
+          maximum: 365
+          default: 90
+          description: 密钥自创建时起的有效天数。
+      additionalProperties: false
+      description: 创建全局调用密钥；MCP 使用 mcp:invoke scope，无需绑定连接或凭证，具体资源访问权由代理地址及用户权限决定。
+    APIKey:
+      type: object
+      required:
+      - id
+      - user_id
+      - name
+      - key_prefix
+      - scopes
+      - expires_at
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 调用密钥 ID。
+        user_id:
+          type: string
+          format: uuid
+          description: 密钥所属用户 ID。
+        user_name:
+          type: string
+          description: 密钥所属用户的显示名称。
+        name:
+          type: string
+          description: 用户设置的密钥名称。
+        key_prefix:
+          type: string
+          description: 用于识别密钥的安全前缀，不可用于鉴权。
+          examples:
+          - mk_abcd1234
+        scopes:
+          type: array
+          description: 密钥具备的调用权限。
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - model:invoke
+            - mcp:invoke
+        expires_at:
+          type: string
+          format: date-time
+          description: 密钥过期时间。
+        last_used_at:
+          type: string
+          format: date-time
+          description: 最近一次成功使用时间；从未使用时不返回。
+        created_at:
+          type: string
+          format: date-time
+          description: 密钥创建时间。
+        revoked_at:
+          type: string
+          format: date-time
+          description: 密钥撤销时间；尚未撤销时不返回。
+    CreatedAPIKey:
+      allOf:
+        - $ref: "#/components/schemas/APIKey"
+        - type: object
+          required: [api_key]
+          properties:
+            api_key:
+              type: string
+              pattern: "^mk_"
+              description: 可用于模型或 MCP 请求鉴权的密钥原文，只返回一次。
+
+    ResourceGrant:
+      type: object
+      properties:
+        user_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        user:
+          readOnly: true
+          description: 用户授权的展示信息；分组、全员授权或用户已删除时为 null。停用用户仍返回信息，便于撤销授权。
+          anyOf:
+          - $ref: '#/components/schemas/UserSummary'
+          - type: 'null'
+        group_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        usage_requirement:
+          type: string
+          enum:
+          - optional
+          - required
+          description: 仅系统规则可设置 required。
+      required:
+      - usage_requirement
+    ResourceError:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            references:
+              type:
+              - array
+              - 'null'
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+          required:
+          - code
+          - message
+      required:
+      - error
+    ResourceTag:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required:
+      - id
+      - name
+    OAuthConnectionConfig:
+      type: object
+      description: dynamic 模式只需 MCP URL，首次授权自动发现 OAuth 元数据并动态注册客户端；发现及注册结果由后端维护，同一 URL 的普通编辑保留结果，修改 URL 后重新发现。manual 或未指定模式时，授权与 Token URL 必填，Client ID 和 Registration URL 至少填写一个。后续授权与刷新复用客户端；不支持需要初始访问令牌的注册端点。
+      properties:
+        mode:
+          type: string
+          enum: ['', manual, dynamic]
+          description: 动态自动发现与传统手动配置分开；未指定时沿用已有手动端点配置。
+        resource:
+          type: string
+          readOnly: true
+          description: 自动发现的资源标识，授权及 Token 请求携带此 resource 参数。
+        authorization_url:
+          type: string
+        token_url:
+          type: string
+        client_id:
+          type: string
+        registration_url:
+          type: string
+          description: RFC 7591 动态客户端注册端点；已有 Client ID 时复用，动态注册密钥到期后在下次授权前重新注册，旧客户端对应的凭证需重新授权。
+        token_endpoint_auth_method:
+          type: string
+          enum: ['', none, client_secret_post, client_secret_basic]
+          description: 自动发现模式按服务端元数据选择认证方式，优先 none；手动端点配置留空时，动态注册请求 none，已有客户端沿用 client_secret_post；注册后保存服务端返回的方式。
+        client_secret_expires_at:
+          type: integer
+          format: int64
+          readOnly: true
+          description: 注册服务器返回的客户端密钥到期时间（Unix 秒）；未返回或为 0 表示无已知期限，由后端维护，修改请求中的值被忽略。
+        scopes:
+          type: string
+    ResourceIssue:
+      type: object
+      properties:
+        code:
+          type: string
+        blocking:
+          type: boolean
+        connector_id:
+          type: string
+          format: uuid
+      required:
+      - code
+      - blocking
+    MCPTool:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        input_schema:
+          type: object
+        enabled:
+          type: boolean
+        credits_per_call:
+          type: number
+          minimum: 0
+      required:
+      - id
+      - name
+      - description
+      - input_schema
+      - enabled
+      - credits_per_call
+    AgentRule:
+      type: object
+      properties:
+        shared_groups:
+          type: array
+          readOnly: true
+          items: {$ref: '#/components/schemas/GroupSummary'}
+          description: 仅资源所有者可见的直接分享分组，未分享时为空数组；不展开成员。
+        shared_users:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/UserSummary'
+          description: 仅规则所有者读取个人规则目录时返回共享用户列表，未共享时为 []；接收者和系统规则不返回。
+        ownership_type:
+          type: string
+          enum:
+          - system
+          - user
+          description: 独立资源目录返回；个人规则可由创建者分享给指定用户使用。
+        user:
+          $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+          description: 资源所有者的基本信息；系统资源返回创建者，分享不改变归属。
+        revision:
+          type: integer
+          minimum: 1
+          description: 独立资源目录返回；管理详情和修改接口使用此修订号作为 ETag。
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        name_i18n:
+          type: object
+          additionalProperties: {type: string}
+        description_i18n:
+          type: object
+          additionalProperties: {type: string}
+        content:
+          type: string
+        sha256:
+          type: string
+        required:
+          type: boolean
+          description: 系统规则命中的授权为 required 时不可关闭；optional 可由 Agent 关闭。首次获取的规则默认开启，之后非强制规则的开关状态由 Agent 维护。个人规则固定为 false。
+      required:
+      - id
+      - name
+      - content
+      - sha256
+      - required
+    AgentSkill:
+      type: object
+      properties:
+        shared_groups:
+          type: array
+          readOnly: true
+          items: {$ref: '#/components/schemas/GroupSummary'}
+          description: 仅资源所有者可见的直接分享分组，未分享时为空数组；不展开成员。
+        shared_users:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/UserSummary'
+          description: 仅资源所有者和管理端读取个人资源时返回共享用户列表，未共享时为 []，排除已删除用户；接收方和系统资源不返回。目录中的用户信息变化会更新 ETag。
+        ownership_type:
+          type: string
+          enum:
+          - system
+          - user
+          description: 独立资源目录返回；分享不改变资源归属。
+        user:
+          $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+          description: 资源所有者的基本信息；系统资源返回创建者，分享不改变归属。
+        revision:
+          type: integer
+          minimum: 1
+          description: 独立资源目录返回；管理详情和修改接口使用此修订号作为 ETag。
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        name_i18n:
+          type: object
+          additionalProperties: {type: string}
+        description_i18n:
+          type: object
+          additionalProperties: {type: string}
+        package_sha256:
+          type: string
+        package_size_bytes:
+          type: integer
+        file_count:
+          type: integer
+        download_path:
+          type: string
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceTag'
+      required:
+      - id
+      - name
+      - description
+      - package_sha256
+      - download_path
+    AgentConnector:
+      type: object
+      properties:
+        tags:
+          type: array
+          items: {$ref: '#/components/schemas/ResourceTag'}
+        shared_groups:
+          type: array
+          readOnly: true
+          items: {$ref: '#/components/schemas/GroupSummary'}
+          description: 仅资源所有者可见的直接分享分组，未分享时为空数组；不展开成员。
+        shared_users:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/UserSummary'
+          description: 仅资源所有者和管理端读取个人资源时返回共享用户列表，未共享时为 []，排除已删除用户；接收方和系统资源不返回。目录中的用户信息变化会更新 ETag。
+        ownership_type:
+          type: string
+          enum:
+          - system
+          - user
+          description: 独立资源目录返回；分享不改变资源归属。
+        user:
+          $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+          description: 资源所有者的基本信息；系统资源返回创建者，分享不改变归属。
+        revision:
+          type: integer
+          minimum: 1
+          description: 独立资源目录返回；管理详情和修改接口使用此修订号作为 ETag。
+        id:
+          type: string
+          format: uuid
+        icon_path:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        name_i18n:
+          type: object
+          additionalProperties: {type: string}
+        description_i18n:
+          type: object
+          additionalProperties: {type: string}
+        authorization_mode:
+          type: string
+          enum:
+          - none
+          - centralized
+          - independent
+        authorization_method:
+          type:
+          - string
+          - 'null'
+        authorization_status:
+          type: string
+          enum:
+          - not_required
+          - authorized
+          - authorization_required
+        connection_status:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum:
+            - catalog
+            - invoke
+        mcp_gateway:
+          $ref: '#/components/schemas/MCPGateway'
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/MCPTool'
+        tools_version:
+          type: string
+        credentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentCredential'
+        credential_id:
+          type: string
+          format: uuid
+          description: 集中认证返回当前集中凭证 ID；独立认证在 resolve 选定后返回所选凭证 ID。
+        required:
+          type: boolean
+      required:
+      - id
+      - name
+      - description
+      - authorization_mode
+      - capabilities
+      description: 独立认证在 credentials 内返回每份凭证的工具和专属代理地址；集中认证返回当前集中凭证的代理地址，免认证返回连接地址。resolve 返回所选凭证、工具和 mcp_gateway，API Key 全局创建。
+    AgentExpert:
+      type: object
+      properties:
+        tags:
+          type: array
+          items: {$ref: '#/components/schemas/ResourceTag'}
+        shared_groups:
+          type: array
+          readOnly: true
+          items: {$ref: '#/components/schemas/GroupSummary'}
+          description: 仅资源所有者可见的直接分享分组，未分享时为空数组；不展开成员。
+        shared_users:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/UserSummary'
+          description: 仅资源所有者和管理端读取个人资源时返回共享用户列表，未共享时为 []，排除已删除用户；接收方和系统资源不返回。目录中的用户信息变化会更新 ETag。
+        ownership_type:
+          type: string
+          enum:
+          - system
+          - user
+          description: 独立资源目录返回；分享不改变资源归属。
+        user:
+          $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+          description: 资源所有者的基本信息；系统资源返回创建者，分享不改变归属。
+        revision:
+          type: integer
+          minimum: 1
+          description: 独立资源目录返回；管理详情和修改接口使用此修订号作为 ETag。
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        name_i18n:
+          type: object
+          additionalProperties: {type: string}
+        description_i18n:
+          type: object
+          additionalProperties: {type: string}
+        avatar_path:
+          type: string
+        version:
+          type: string
+        manifest_path:
+          type: string
+        available:
+          type: boolean
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceIssue'
+      required:
+      - id
+      - name
+      - version
+      - manifest_path
+      - available
+      - issues
+    ExpertManifest:
+      type: object
+      properties:
+        expert_id:
+          type: string
+        name:
+          type: string
+        name_i18n:
+          type: object
+          additionalProperties: {type: string}
+        description_i18n:
+          type: object
+          additionalProperties: {type: string}
+        avatar_path:
+          type: string
+        prompt:
+          type: string
+        version:
+          type: string
+        available:
+          type: boolean
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentRule'
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSkill'
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentConnector'
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceIssue'
+      required:
+      - expert_id
+      - prompt
+      - version
+      - available
+      - rules
+      - skills
+      - connectors
+      - issues
+    ResolveResources:
+      type: object
+      properties:
+        expert_id:
+          type: string
+          format: uuid
+        rule_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        skill_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        connector_bindings:
+          type: object
+          additionalProperties:
+            type: string
+            format: uuid
+          description: 本次已选择的独立 Connector ID 到凭证 ID；不会隐式选择连接。无绑定时恰好一个有效凭证才自动选择，多份返回 credential_selection_required。
+        connector_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    OAuthAuthorization:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        authorization_url:
+          type: string
+          format: uri
+        expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+      required:
+      - id
+      - authorization_url
+      - expires_at
+    AuthorizationStatus:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - pending
+          - processing
+          - succeeded
+          - failed
+          - expired
+        credential_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+      required:
+      - id
+      - status
+    CredentialInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        http_headers:
+          type: object
+          minProperties: 1
+          maxProperties: 30
+          additionalProperties:
+            type: string
+          writeOnly: true
+          description: 完整 Header 键值；禁止大小写重复、CR/LF、Host、传输控制、Mcp-*、Content-Type 和 Accept。整组替换，响应不回填。
+      required:
+      - name
+      - http_headers
+    RuleResource:
+      type: object
+      properties:
+        shared_groups:
+          type: array
+          readOnly: true
+          items: {$ref: '#/components/schemas/GroupSummary'}
+          description: 仅资源所有者可见的直接分享分组，未分享时为空数组；不展开成员。
+        shared_users:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/UserSummary'
+          description: 个人规则的共享用户列表；仅所有者及管理端可读取，未共享时为 []。
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+        ownership_type:
+          type: string
+          enum:
+          - system
+          - user
+        user:
+          $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+          description: 资源所有者的基本信息；系统资源返回创建者，分享不改变归属。
+        icon_path:
+          type: string
+        enabled:
+          type: boolean
+        grants:
+          description: 系统规则的授权范围；个人规则的指定用户只读共享授权（不可强制应用），仅所有者及管理端可读取。
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceGrant'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        content:
+          type: string
+      required:
+      - id
+      - name
+      - revision
+      - grants
+    RuleInput:
+      type: object
+      properties:
+        content:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceGrant'
+      required:
+      - name
+      - content
+    SkillResource:
+      type: object
+      properties:
+        shared_groups:
+          type: array
+          readOnly: true
+          items: {$ref: '#/components/schemas/GroupSummary'}
+          description: 仅资源所有者可见的直接分享分组，未分享时为空数组；不展开成员。
+        shared_users:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/UserSummary'
+          description: 仅资源所有者和管理端读取个人资源时返回共享用户列表，未共享时为 []，排除已删除用户；接收方和系统资源不返回。目录中的用户信息变化会更新 ETag。
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+        ownership_type:
+          type: string
+          enum:
+          - system
+          - user
+        user:
+          $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+          description: 资源所有者的基本信息；系统资源返回创建者，分享不改变归属。
+        icon_path:
+          type: string
+        enabled:
+          type: boolean
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceGrant'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        description:
+          type: string
+        package_file_name:
+          type: string
+        package_sha256:
+          type: string
+        package_size_bytes:
+          type: integer
+        file_count:
+          type: integer
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceTag'
+      required:
+      - id
+      - name
+      - revision
+      - grants
+    SkillInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        content:
+          type: string
+        tag_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceGrant'
+      required:
+      - name
+    ExpertResource:
+      type: object
+      properties:
+        tags:
+          type: array
+          items: {$ref: '#/components/schemas/ResourceTag'}
+        shared_groups:
+          type: array
+          readOnly: true
+          items: {$ref: '#/components/schemas/GroupSummary'}
+          description: 仅资源所有者可见的直接分享分组，未分享时为空数组；不展开成员。
+        shared_users:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/UserSummary'
+          description: 仅资源所有者和管理端读取个人资源时返回共享用户列表，未共享时为 []，排除已删除用户；接收方和系统资源不返回。目录中的用户信息变化会更新 ETag。
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+        ownership_type:
+          type: string
+          enum:
+          - system
+          - user
+        user:
+          $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+          description: 资源所有者的基本信息；系统资源返回创建者，分享不改变归属。
+        icon_path:
+          type: string
+        enabled:
+          type: boolean
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceGrant'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        description:
+          type: string
+        prompt:
+          type: string
+        rule_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        skill_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorDependency'
+      required:
+      - id
+      - name
+      - revision
+      - grants
+    ExpertInput:
+      type: object
+      properties:
+        tag_ids:
+          type: array
+          items: {type: string, format: uuid}
+        description:
+          type: string
+        prompt:
+          type: string
+        rule_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        skill_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceGrant'
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorDependency'
+      required:
+      - name
+      - prompt
+    ConnectorResource:
+      type: object
+      properties:
+        tags:
+          type: array
+          items: {$ref: '#/components/schemas/ResourceTag'}
+        shared_groups:
+          type: array
+          readOnly: true
+          items: {$ref: '#/components/schemas/GroupSummary'}
+          description: 仅资源所有者可见的直接分享分组，未分享时为空数组；不展开成员。
+        shared_users:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/UserSummary'
+          description: 仅资源所有者和管理端读取个人资源时返回共享用户列表，未共享时为 []，排除已删除用户；接收方和系统资源不返回。目录中的用户信息变化会更新 ETag。
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+        ownership_type:
+          type: string
+          enum:
+          - system
+          - user
+        user:
+          $ref: '#/components/schemas/UserSummary'
+          readOnly: true
+          description: 资源所有者的基本信息；系统资源返回创建者，分享不改变归属。
+        icon_path:
+          type: string
+        enabled:
+          type: boolean
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceGrant'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        description:
+          type: string
+        url:
+          type: string
+          format: uri
+        authorization_mode:
+          type: string
+          enum:
+          - none
+          - centralized
+          - independent
+        authorization_method:
+          type:
+          - string
+          - 'null'
+        oauth_config:
+          $ref: '#/components/schemas/OAuthConnectionConfig'
+        callback_url:
+          type: string
+          readOnly: true
+          description: OAuth MCP 的专属完整回调地址，格式为 {MONKEYAI_PUBLIC_URL}/oauth/connectors/{id}/callback；非 OAuth 连接为空字符串。
+        config_revision:
+          type: integer
+        credential_configured:
+          type: boolean
+        connection_status:
+          type: string
+        tool_count:
+          type: integer
+        credentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorCredential'
+      required:
+      - id
+      - name
+      - revision
+      - grants
+      - callback_url
+    ConnectorInput:
+      type: object
+      properties:
+        tag_ids:
+          type: array
+          items: {type: string, format: uuid}
+        description:
+          type: string
+        url:
+          type: string
+          format: uri
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceGrant'
+        authorization_mode:
+          type: string
+          enum:
+          - none
+          - centralized
+          - independent
+        authorization_method:
+          type:
+          - string
+          - 'null'
+          enum:
+          - oauth
+          - http_header
+          - null
+        oauth_config:
+          $ref: '#/components/schemas/OAuthConnectionConfig'
+        oauth_client_secret:
+          type: string
+          writeOnly: true
+          description: 省略保留，空字符串清空；应用或端点变更时省略会清除旧 Secret。
+      required:
+      - name
+    AgentCredential:
+      allOf:
+      - $ref: '#/components/schemas/ConnectorCredential'
+      - type: object
+        properties:
+          tools:
+            type: array
+            items:
+              $ref: '#/components/schemas/MCPTool'
+          tools_version:
+            type: string
+          mcp_gateway:
+            $ref: '#/components/schemas/MCPGateway'
+    AuthorizationName:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+      required:
+      - name
+    ConnectorCredential:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        connector_id:
+          type: string
+          format: uuid
+        user:
+          oneOf:
+          - $ref: '#/components/schemas/UserSummary'
+          - type: 'null'
+          readOnly: true
+          description: 凭证所属的平台用户基本信息；集中凭证为 null，不读取上游 OAuth 用户资料。
+        name:
+          type: string
+        revision:
+          type: integer
+        config_revision:
+          type: integer
+        authorization_status:
+          type: string
+          enum:
+          - authorized
+          - authorization_required
+          - revoked
+        connection_status:
+          type: string
+          enum:
+          - unknown
+          - connected
+          - error
+        header_names:
+          type: array
+          items:
+            type: string
+        last_checked_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_error:
+          type:
+          - string
+          - 'null'
+        oauth_expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        revoked_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+      required:
+      - id
+      - connector_id
+      - user
+      - name
+      - revision
+      - authorization_status
+      - connection_status
+    ConnectorDependency:
+      type: object
+      properties:
+        required:
+          type: boolean
+        tool_allowlist:
+          type: array
+          items:
+            type: string
+        tool_denylist:
+          type: array
+          items:
+            type: string
+        connector_id:
+          type: string
+          format: uuid
+      required:
+      - connector_id
+    CredentialPatch:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        http_headers:
+          type: object
+          minProperties: 1
+          maxProperties: 30
+          additionalProperties:
+            type: string
+          writeOnly: true
+          description: 完整 Header 键值；禁止大小写重复、CR/LF、Host、传输控制、Mcp-*、Content-Type 和 Accept。整组替换，响应不回填。
+      minProperties: 1
+    MCPGateway:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: 以 /mcp 为前缀：免认证为 /mcp/connectors/{id}，集中或独立认证为 /mcp/connectors/{id}/credentials/{credential_id}。全局 API Key
+            认证用户，服务端校验地址对应连接使用权、凭证归属和有效性。
+        transport:
+          const: streamable_http
+        authentication:
+          const: api_key
+        required_scope:
+          const: mcp:invoke
+      required:
+      - url
+      - transport
+      - authentication
+      - required_scope

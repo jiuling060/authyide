@@ -1,0 +1,43 @@
+# Logs
+logs
+*.log
+.DS_Store
+
+# Dependencies
+node_modules/
+
+# Rust build output
+desktop/target/
+
+# Build binaries and deploy artifacts
+backend/server
+Artifacts/
+
+# Editor / IDE
+.vscode/
+.codex/
+
+# Local build artifacts
+monkeycode-ai/
+backend/bin/
+.pnpm-store/
+frontend/.vite/
+
+# Electron (electron-builder)
+desktop/release/
+desktop/release-full/
+frontend/release/
+
+# tar
+*.tar
+*.tgz
+
+# Builder
+dist
+
+# ai
+.superpowers/
+desktop/uidist/
+
+# ohmyagent 工具生成的临时工作树
+.ohmyagent/

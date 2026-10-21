@@ -1,0 +1,38 @@
+# Ad network registry for apps authored in the AuthyIDE user center.
+#
+# AuthyIDE itself serves no ads, runs no ad network and never validates the
+# app id a user types in. This file is the single source of truth for which
+# networks a user may pick: the backend reads it on startup, validates writes
+# against it, and serves the list to the frontend so both sides share one set.
+#
+# Fields read by the backend: id, displayName, vendor, platforms.
+networks:
+  - id: none
+    displayName: 不展示广告
+    vendor: ""
+    platforms: [web, android, ios, harmonyos, desktop]
+
+  - id: admob
+    displayName: Google AdMob
+    vendor: Google
+    platforms: [android, ios, web]
+
+  - id: pangle
+    displayName: 穿山甲 Pangle
+    vendor: ByteDance
+    platforms: [android, ios, harmonyos]
+
+  - id: gdt
+    displayName: 腾讯优量汇
+    vendor: Tencent
+    platforms: [android, ios]
+
+  - id: unity
+    displayName: Unity Ads
+    vendor: Unity
+    platforms: [android, ios]
+
+  - id: applovin
+    displayName: AppLovin MAX
+    vendor: AppLovin
+    platforms: [android, ios]
