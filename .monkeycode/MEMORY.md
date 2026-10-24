@@ -470,6 +470,18 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - **`taskflow.grpc_url` 始终没查成**，查它的 SSH 连接被限流挡了。这是宿主机 Agent 能否注册上的关键，手动跑一句 `docker exec authyide-backend printenv | grep -i taskflow` 就能确认，空值要配上 `MCAI_SERVER_BASE_URL` 对应的 gRPC 地址。
   - 从外部实测 2026-10-23：`tcp://38.39.30.160:8000` 能建连但对 HTTP/1.1 请求不回任何字节（`curl` 得 `http_code=000`），符合 gRPC/HTTP2 行为，说明 gRPC 回连端口是开的、没被防火墙挡。runner 的三个上游（compose、env.template、get-docker.sh）从本机都能拉，`host.tgz`/`docker.tgz` 之外的依赖全部可达。
 
+[宿主机/开发环境链路：taskflow 侧整段没接上]
+- Date: 2026-10-24
+- Context: 用户反馈管理后台「开发环境宿主机」页面报错，排查 backend 到 taskflow 的 REST 链路
+- Category: 运维部署|故障排查
+- Instructions:
+  - **`TASKFLOW_SERVER=http://127.0.0.1:9` 是当时故意填的占位值**（见本文件前面那条部署记录），不是被截断的 `9xxx`。backend 日志实测 `Post "http://127.0.0.1:9/internal/host/is-online": dial tcp 127.0.0.1:9: connect: connection refused`。127.0.0.1 上 9000/9001/9100/9200/9443/50443/8080/7000 全部 closed。
+  - **orchestrator 容器确实装上了，但两边不通**：`monkeycode_runner-orchestrator-1`（`codingmatrix-orchestrator:latest`）在 `monkeycode_runner_default` 网络（172.19.0.3），backend 在 `authyide_authyide` 网络，两个 bridge 网络互不相通；orchestrator `ExposedPorts=null`、`Ports={}`，没有任何端口映射。compose 在 `/data/monkeycode_runner/docker-compose.yml`。
+  - **orchestrator 自己的回连配置也是空的**：`ORCHESTRATOR_GRPC_HOST`/`ORCHESTRATOR_GRPC_PORT`/`ORCHESTRATOR_GRPC_URL` 三个 env 全部无值，`ORCHESTRATOR_GRPC_PROXY` 空串，`ORCHESTRATOR_TYPE=docker` 是唯一有值的。也就是 runner 装上之后双向都没通。同栈的 `watchtower` 容器状态是 `Restarting (1)`。
+  - **要接通需要三件事**，不是改一个变量：(1) 让 backend 能到 orchestrator（并入同一网络，或把 orchestrator 的 HTTP 端口发布到宿主机再改 `TASKFLOW_SERVER`）；(2) 给 orchestrator 填 `ORCHESTRATOR_GRPC_URL` 指回平台的 gRPC；(3) 填 `ORCHESTRATOR_AUTH_TOKEN`。参考 `backend/docker-compose.yml:108-128` 里 `taskflow` 服务就是 `backend` 同网络、无端口发布的写法，`TASKFLOW_SERVER: http://monkeycode-ai-taskflow:8888`（第 144 行）。
+  - **列表页 500 的直接原因已修**：`TeamHostUsecase.List`（`backend/biz/team/usecase/host.go`）无条件调 `taskflow.Host().IsOnline` 与 `VirtualMachiner().IsOnline`，任一失败就整体返回 error，handler 直接 500，前端整页报错。已改为记 WARN 后按离线降级（`taskflow.IsOnlineResp{}` 的 nil `OnlineMap` 读取返回 false，不会 panic），并用 `TestTeamHostListDegradesToOfflineWhenTaskflowUnreachable` 覆盖。降级只救列表展示，建虚拟机仍走 `taskflow.VirtualMachiner().Create()`（`backend/biz/host/usecase/host.go:452`），依赖同上。
+  - **SSH 限流的教训（本文件已有条目，再次印证）**：被拒之后反复用探针试连通性会把冷却窗口重置得更久，实测连探针连接都打穿限流。被拒后不要试探，直接静默 15-20 分钟再一次性把「上传 + 触发」用两条连接做完。
+
 [服务器直接入队构建任务：两个前置与一个 EXDEV 代码缺陷]
 - Date: 2026-10-24
 - Context: Agent 想绕过 UI/captcha 直接在服务器上产出一个可装机 APK，通过向 `app_build_jobs` 插行让常驻 worker 拾取
