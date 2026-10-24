@@ -73,13 +73,15 @@ func (u *TeamHostUsecase) List(ctx context.Context, teamUser *domain.TeamUser) (
 		return nil, err
 	}
 
+	// 在线状态是列表的装饰性信息，taskflow 不可达时降级为全部离线，避免整个列表报错
 	resp, err := u.taskflow.Host().IsOnline(ctx, &taskflow.IsOnlineReq[string]{
 		IDs: cvt.Iter(hosts, func(_ int, h *db.Host) string {
 			return h.ID
 		}),
 	})
 	if err != nil {
-		return nil, err
+		u.logger.WarnContext(ctx, "taskflow unreachable, showing hosts as offline", "error", err)
+		resp = &taskflow.IsOnlineResp{}
 	}
 	vmids := make([]string, 0)
 	for _, host := range hosts {
@@ -91,7 +93,8 @@ func (u *TeamHostUsecase) List(ctx context.Context, teamUser *domain.TeamUser) (
 		IDs: vmids,
 	})
 	if err != nil {
-		return nil, err
+		u.logger.WarnContext(ctx, "taskflow unreachable, showing vms as offline", "error", err)
+		vmonline = &taskflow.IsOnlineResp{}
 	}
 
 	res := make([]*domain.Host, len(hosts))
