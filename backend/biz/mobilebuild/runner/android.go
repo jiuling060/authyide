@@ -210,6 +210,9 @@ func (r *androidRunner) tuneGradleProperties(log io.Writer) error {
 		"org.gradle.parallel=false",
 		"org.gradle.workers.max=2",
 		"kotlin.daemon.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=384m",
+		// react-native-reanimated and expo-modules-core both emit libworklets.so;
+		// mergeReleaseNativeLibs aborts on the duplicate unless one is picked.
+		"android.packagingOptions.pickFirsts=**/*.so",
 	}
 	out := strings.TrimRight(string(data), "\n")
 	for _, line := range tune {
