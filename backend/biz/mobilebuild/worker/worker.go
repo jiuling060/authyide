@@ -408,44 +408,33 @@ func (w *Worker) workspaceFor(platform string, jobID uuid.UUID) (string, func(),
 	return dst, func() { os.RemoveAll(dst) }, nil
 }
 
-// copyTemplate clones the build template into dst. Hard links keep the copy
-// cheap and metadata-preserving, but cp exits EXDEV when src and dst sit on
-// different filesystems, which is common: the template usually lives on the
-// source volume while asset root is its own mount. Pick the strategy by
-// comparing the two devices up front instead of learning it from a failed run.
+// runCopy shells out to cp. A test can swap it to make the hard-link attempt
+// fail without needing real mount points.
+var runCopy = func(args ...string) ([]byte, error) {
+	return exec.Command("cp", args...).CombinedOutput()
+}
+
+// copyTemplate clones the build template into dst. Hard links are the cheap
+// path: no bytes move and the build does not need to re-read the template.
+// But cp exits EXDEV across a mount boundary, and that boundary is ordinary
+// here - the template lives on the source volume while asset root is its own
+// mount. Device numbers cannot be trusted to predict it either: two overlay
+// mounts over the same backing storage report the same st_dev while still
+// refusing to link between layers. So the copy is attempted with hard links
+// and redone as a real copy if cp refuses, which is what matters.
 func copyTemplate(src, dst string) ([]byte, error) {
-	mode := "-a"
-	if same, err := sameFilesystem(src, filepath.Dir(dst)); err == nil && same {
-		mode = "-al"
+	out, err := runCopy("-al", src, dst)
+	if err == nil {
+		return out, nil
 	}
-	return exec.Command("cp", mode, src, dst).CombinedOutput()
-}
-
-// sameFilesystem reports whether a and b live on the same filesystem.
-func sameFilesystem(a, b string) (bool, error) {
-	sa, err := os.Stat(a)
-	if err != nil {
-		return false, err
+	// A refused cp -al leaves a partial tree of links behind. It must go: cp -a
+	// into an existing directory copies into it instead of creating dst.
+	_ = os.RemoveAll(dst)
+	out2, err2 := runCopy("-a", src, dst)
+	if err2 != nil {
+		return append(out, out2...), err2
 	}
-	sb, err := os.Stat(b)
-	if err != nil {
-		return false, err
-	}
-	return statSameDevice(sa.Sys(), sb.Sys()), nil
-}
-
-// statSameDevice compares two stat payloads. Kept pure so the cross-device
-// decision can be exercised without real mount points in a test.
-func statSameDevice(a, b any) bool {
-	sa, ok := a.(*syscall.Stat_t)
-	if !ok {
-		return false
-	}
-	sb, ok := b.(*syscall.Stat_t)
-	if !ok {
-		return false
-	}
-	return sa.Dev == sb.Dev
+	return out2, nil
 }
 
 // storeArtifacts moves every produced artifact into the job's own directory.
