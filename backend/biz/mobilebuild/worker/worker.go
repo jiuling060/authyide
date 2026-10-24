@@ -401,11 +401,51 @@ func (w *Worker) workspaceFor(platform string, jobID uuid.UUID) (string, func(),
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", nil, err
 	}
-	out, err := exec.Command("cp", "-al", mc.Workspace, dst).CombinedOutput()
+	out, err := copyTemplate(mc.Workspace, dst)
 	if err != nil {
 		return "", nil, fmt.Errorf("%w: %s", err, out)
 	}
 	return dst, func() { os.RemoveAll(dst) }, nil
+}
+
+// copyTemplate clones the build template into dst. Hard links keep the copy
+// cheap and metadata-preserving, but cp exits EXDEV when src and dst sit on
+// different filesystems, which is common: the template usually lives on the
+// source volume while asset root is its own mount. Pick the strategy by
+// comparing the two devices up front instead of learning it from a failed run.
+func copyTemplate(src, dst string) ([]byte, error) {
+	mode := "-a"
+	if same, err := sameFilesystem(src, filepath.Dir(dst)); err == nil && same {
+		mode = "-al"
+	}
+	return exec.Command("cp", mode, src, dst).CombinedOutput()
+}
+
+// sameFilesystem reports whether a and b live on the same filesystem.
+func sameFilesystem(a, b string) (bool, error) {
+	sa, err := os.Stat(a)
+	if err != nil {
+		return false, err
+	}
+	sb, err := os.Stat(b)
+	if err != nil {
+		return false, err
+	}
+	return statSameDevice(sa.Sys(), sb.Sys()), nil
+}
+
+// statSameDevice compares two stat payloads. Kept pure so the cross-device
+// decision can be exercised without real mount points in a test.
+func statSameDevice(a, b any) bool {
+	sa, ok := a.(*syscall.Stat_t)
+	if !ok {
+		return false
+	}
+	sb, ok := b.(*syscall.Stat_t)
+	if !ok {
+		return false
+	}
+	return sa.Dev == sb.Dev
 }
 
 // storeArtifacts moves every produced artifact into the job's own directory.
