@@ -71,6 +71,20 @@ func (_c *AppCreate) SetNillableIconKey(v *string) *AppCreate {
 	return _c
 }
 
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (_c *AppCreate) SetSourceSnapshotID(v uuid.UUID) *AppCreate {
+	_c.mutation.SetSourceSnapshotID(v)
+	return _c
+}
+
+// SetNillableSourceSnapshotID sets the "source_snapshot_id" field if the given value is not nil.
+func (_c *AppCreate) SetNillableSourceSnapshotID(v *uuid.UUID) *AppCreate {
+	if v != nil {
+		_c.SetSourceSnapshotID(*v)
+	}
+	return _c
+}
+
 // SetAdNetwork sets the "ad_network" field.
 func (_c *AppCreate) SetAdNetwork(v string) *AppCreate {
 	_c.mutation.SetAdNetwork(v)
@@ -421,6 +435,10 @@ func (_c *AppCreate) createSpec() (*App, *sqlgraph.CreateSpec) {
 		_spec.SetField(app.FieldIconKey, field.TypeString, value)
 		_node.IconKey = value
 	}
+	if value, ok := _c.mutation.SourceSnapshotID(); ok {
+		_spec.SetField(app.FieldSourceSnapshotID, field.TypeUUID, value)
+		_node.SourceSnapshotID = &value
+	}
 	if value, ok := _c.mutation.AdNetwork(); ok {
 		_spec.SetField(app.FieldAdNetwork, field.TypeString, value)
 		_node.AdNetwork = value
@@ -607,6 +625,24 @@ func (u *AppUpsert) UpdateIconKey() *AppUpsert {
 // ClearIconKey clears the value of the "icon_key" field.
 func (u *AppUpsert) ClearIconKey() *AppUpsert {
 	u.SetNull(app.FieldIconKey)
+	return u
+}
+
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (u *AppUpsert) SetSourceSnapshotID(v uuid.UUID) *AppUpsert {
+	u.Set(app.FieldSourceSnapshotID, v)
+	return u
+}
+
+// UpdateSourceSnapshotID sets the "source_snapshot_id" field to the value that was provided on create.
+func (u *AppUpsert) UpdateSourceSnapshotID() *AppUpsert {
+	u.SetExcluded(app.FieldSourceSnapshotID)
+	return u
+}
+
+// ClearSourceSnapshotID clears the value of the "source_snapshot_id" field.
+func (u *AppUpsert) ClearSourceSnapshotID() *AppUpsert {
+	u.SetNull(app.FieldSourceSnapshotID)
 	return u
 }
 
@@ -925,6 +961,27 @@ func (u *AppUpsertOne) UpdateIconKey() *AppUpsertOne {
 func (u *AppUpsertOne) ClearIconKey() *AppUpsertOne {
 	return u.Update(func(s *AppUpsert) {
 		s.ClearIconKey()
+	})
+}
+
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (u *AppUpsertOne) SetSourceSnapshotID(v uuid.UUID) *AppUpsertOne {
+	return u.Update(func(s *AppUpsert) {
+		s.SetSourceSnapshotID(v)
+	})
+}
+
+// UpdateSourceSnapshotID sets the "source_snapshot_id" field to the value that was provided on create.
+func (u *AppUpsertOne) UpdateSourceSnapshotID() *AppUpsertOne {
+	return u.Update(func(s *AppUpsert) {
+		s.UpdateSourceSnapshotID()
+	})
+}
+
+// ClearSourceSnapshotID clears the value of the "source_snapshot_id" field.
+func (u *AppUpsertOne) ClearSourceSnapshotID() *AppUpsertOne {
+	return u.Update(func(s *AppUpsert) {
+		s.ClearSourceSnapshotID()
 	})
 }
 
@@ -1441,6 +1498,27 @@ func (u *AppUpsertBulk) UpdateIconKey() *AppUpsertBulk {
 func (u *AppUpsertBulk) ClearIconKey() *AppUpsertBulk {
 	return u.Update(func(s *AppUpsert) {
 		s.ClearIconKey()
+	})
+}
+
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (u *AppUpsertBulk) SetSourceSnapshotID(v uuid.UUID) *AppUpsertBulk {
+	return u.Update(func(s *AppUpsert) {
+		s.SetSourceSnapshotID(v)
+	})
+}
+
+// UpdateSourceSnapshotID sets the "source_snapshot_id" field to the value that was provided on create.
+func (u *AppUpsertBulk) UpdateSourceSnapshotID() *AppUpsertBulk {
+	return u.Update(func(s *AppUpsert) {
+		s.UpdateSourceSnapshotID()
+	})
+}
+
+// ClearSourceSnapshotID clears the value of the "source_snapshot_id" field.
+func (u *AppUpsertBulk) ClearSourceSnapshotID() *AppUpsertBulk {
+	return u.Update(func(s *AppUpsert) {
+		s.ClearSourceSnapshotID()
 	})
 }
 

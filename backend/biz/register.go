@@ -19,6 +19,7 @@ import (
 	"github.com/chaitin/MonkeyCode/backend/biz/project"
 	"github.com/chaitin/MonkeyCode/backend/biz/public"
 	"github.com/chaitin/MonkeyCode/backend/biz/server"
+	"github.com/chaitin/MonkeyCode/backend/biz/snapshot"
 	"github.com/chaitin/MonkeyCode/backend/biz/setting"
 	"github.com/chaitin/MonkeyCode/backend/biz/skill"
 	"github.com/chaitin/MonkeyCode/backend/biz/static"
@@ -42,6 +43,7 @@ func RegisterAll(i *do.Injector) error {
 	team.ProvideTeam(i)
 	host.ProvideHost(i)
 	app.ProvideApp(i)
+	snapshot.ProvideSnapshot(i)
 	agentresource.ProvideAgentResource(i)
 	task.ProvideTask(i)
 	git.ProvideGit(i)
@@ -63,6 +65,7 @@ func InvokeAll(i *do.Injector) {
 	team.InvokeTeam(i)
 	host.InvokeHost(i)
 	app.InvokeApp(i)
+	snapshot.InvokeSnapshot(i)
 	task.InvokeTask(i)
 	git.InvokeGit(i)
 	mobilebuild.InvokeMobileBuild(i)

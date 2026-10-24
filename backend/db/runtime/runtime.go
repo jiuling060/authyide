@@ -18,8 +18,12 @@ import (
 	"github.com/chaitin/MonkeyCode/backend/db/agentsyncjob"
 	"github.com/chaitin/MonkeyCode/backend/db/app"
 	"github.com/chaitin/MonkeyCode/backend/db/appbranding"
+	"github.com/chaitin/MonkeyCode/backend/db/appbuildartifact"
 	"github.com/chaitin/MonkeyCode/backend/db/appbuildjob"
+	"github.com/chaitin/MonkeyCode/backend/db/appdesktopbranding"
+	"github.com/chaitin/MonkeyCode/backend/db/appsourcesnapshot"
 	"github.com/chaitin/MonkeyCode/backend/db/audit"
+	"github.com/chaitin/MonkeyCode/backend/db/desktopbranding"
 	"github.com/chaitin/MonkeyCode/backend/db/entitlement"
 	"github.com/chaitin/MonkeyCode/backend/db/gitbot"
 	"github.com/chaitin/MonkeyCode/backend/db/gitbottask"
@@ -347,27 +351,27 @@ func init() {
 	// app.PackageIDValidator is a validator for the "package_id" field. It is called by the builders before save.
 	app.PackageIDValidator = appDescPackageID.Validators[0].(func(string) error)
 	// appDescAdNetwork is the schema descriptor for ad_network field.
-	appDescAdNetwork := appFields[5].Descriptor()
+	appDescAdNetwork := appFields[6].Descriptor()
 	// app.DefaultAdNetwork holds the default value on creation for the ad_network field.
 	app.DefaultAdNetwork = appDescAdNetwork.Default.(string)
 	// appDescBuildCount is the schema descriptor for build_count field.
-	appDescBuildCount := appFields[8].Descriptor()
+	appDescBuildCount := appFields[9].Descriptor()
 	// app.DefaultBuildCount holds the default value on creation for the build_count field.
 	app.DefaultBuildCount = appDescBuildCount.Default.(int)
 	// appDescLocked is the schema descriptor for locked field.
-	appDescLocked := appFields[9].Descriptor()
+	appDescLocked := appFields[10].Descriptor()
 	// app.DefaultLocked holds the default value on creation for the locked field.
 	app.DefaultLocked = appDescLocked.Default.(bool)
 	// appDescStatus is the schema descriptor for status field.
-	appDescStatus := appFields[10].Descriptor()
+	appDescStatus := appFields[11].Descriptor()
 	// app.DefaultStatus holds the default value on creation for the status field.
 	app.DefaultStatus = appDescStatus.Default.(string)
 	// appDescCreatedAt is the schema descriptor for created_at field.
-	appDescCreatedAt := appFields[15].Descriptor()
+	appDescCreatedAt := appFields[16].Descriptor()
 	// app.DefaultCreatedAt holds the default value on creation for the created_at field.
 	app.DefaultCreatedAt = appDescCreatedAt.Default.(func() time.Time)
 	// appDescUpdatedAt is the schema descriptor for updated_at field.
-	appDescUpdatedAt := appFields[16].Descriptor()
+	appDescUpdatedAt := appFields[17].Descriptor()
 	// app.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	app.DefaultUpdatedAt = appDescUpdatedAt.Default.(func() time.Time)
 	// app.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
@@ -449,6 +453,51 @@ func init() {
 	appbrandingDescID := appbrandingFields[0].Descriptor()
 	// appbranding.DefaultID holds the default value on creation for the id field.
 	appbranding.DefaultID = appbrandingDescID.Default.(func() uuid.UUID)
+	appbuildartifactMixin := schema.AppBuildArtifact{}.Mixin()
+	appbuildartifactMixinHooks0 := appbuildartifactMixin[0].Hooks()
+	appbuildartifact.Hooks[0] = appbuildartifactMixinHooks0[0]
+	appbuildartifactMixinInters0 := appbuildartifactMixin[0].Interceptors()
+	appbuildartifact.Interceptors[0] = appbuildartifactMixinInters0[0]
+	appbuildartifactFields := schema.AppBuildArtifact{}.Fields()
+	_ = appbuildartifactFields
+	// appbuildartifactDescPlatform is the schema descriptor for platform field.
+	appbuildartifactDescPlatform := appbuildartifactFields[2].Descriptor()
+	// appbuildartifact.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
+	appbuildartifact.PlatformValidator = appbuildartifactDescPlatform.Validators[0].(func(string) error)
+	// appbuildartifactDescChannel is the schema descriptor for channel field.
+	appbuildartifactDescChannel := appbuildartifactFields[3].Descriptor()
+	// appbuildartifact.ChannelValidator is a validator for the "channel" field. It is called by the builders before save.
+	appbuildartifact.ChannelValidator = appbuildartifactDescChannel.Validators[0].(func(string) error)
+	// appbuildartifactDescFileName is the schema descriptor for file_name field.
+	appbuildartifactDescFileName := appbuildartifactFields[4].Descriptor()
+	// appbuildartifact.FileNameValidator is a validator for the "file_name" field. It is called by the builders before save.
+	appbuildartifact.FileNameValidator = appbuildartifactDescFileName.Validators[0].(func(string) error)
+	// appbuildartifactDescArtifactPath is the schema descriptor for artifact_path field.
+	appbuildartifactDescArtifactPath := appbuildartifactFields[5].Descriptor()
+	// appbuildartifact.ArtifactPathValidator is a validator for the "artifact_path" field. It is called by the builders before save.
+	appbuildartifact.ArtifactPathValidator = appbuildartifactDescArtifactPath.Validators[0].(func(string) error)
+	// appbuildartifactDescArtifactSha256 is the schema descriptor for artifact_sha256 field.
+	appbuildartifactDescArtifactSha256 := appbuildartifactFields[6].Descriptor()
+	// appbuildartifact.ArtifactSha256Validator is a validator for the "artifact_sha256" field. It is called by the builders before save.
+	appbuildartifact.ArtifactSha256Validator = appbuildartifactDescArtifactSha256.Validators[0].(func(string) error)
+	// appbuildartifactDescArtifactSize is the schema descriptor for artifact_size field.
+	appbuildartifactDescArtifactSize := appbuildartifactFields[7].Descriptor()
+	// appbuildartifact.DefaultArtifactSize holds the default value on creation for the artifact_size field.
+	appbuildartifact.DefaultArtifactSize = appbuildartifactDescArtifactSize.Default.(int64)
+	// appbuildartifactDescCreatedAt is the schema descriptor for created_at field.
+	appbuildartifactDescCreatedAt := appbuildartifactFields[8].Descriptor()
+	// appbuildartifact.DefaultCreatedAt holds the default value on creation for the created_at field.
+	appbuildartifact.DefaultCreatedAt = appbuildartifactDescCreatedAt.Default.(func() time.Time)
+	// appbuildartifactDescUpdatedAt is the schema descriptor for updated_at field.
+	appbuildartifactDescUpdatedAt := appbuildartifactFields[9].Descriptor()
+	// appbuildartifact.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	appbuildartifact.DefaultUpdatedAt = appbuildartifactDescUpdatedAt.Default.(func() time.Time)
+	// appbuildartifact.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	appbuildartifact.UpdateDefaultUpdatedAt = appbuildartifactDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// appbuildartifactDescID is the schema descriptor for id field.
+	appbuildartifactDescID := appbuildartifactFields[0].Descriptor()
+	// appbuildartifact.DefaultID holds the default value on creation for the id field.
+	appbuildartifact.DefaultID = appbuildartifactDescID.Default.(func() uuid.UUID)
 	appbuildjobMixin := schema.AppBuildJob{}.Mixin()
 	appbuildjobMixinHooks0 := appbuildjobMixin[0].Hooks()
 	appbuildjob.Hooks[0] = appbuildjobMixinHooks0[0]
@@ -457,39 +506,39 @@ func init() {
 	appbuildjobFields := schema.AppBuildJob{}.Fields()
 	_ = appbuildjobFields
 	// appbuildjobDescPlatform is the schema descriptor for platform field.
-	appbuildjobDescPlatform := appbuildjobFields[3].Descriptor()
+	appbuildjobDescPlatform := appbuildjobFields[5].Descriptor()
 	// appbuildjob.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
 	appbuildjob.PlatformValidator = appbuildjobDescPlatform.Validators[0].(func(string) error)
 	// appbuildjobDescTargetVersion is the schema descriptor for target_version field.
-	appbuildjobDescTargetVersion := appbuildjobFields[4].Descriptor()
+	appbuildjobDescTargetVersion := appbuildjobFields[6].Descriptor()
 	// appbuildjob.TargetVersionValidator is a validator for the "target_version" field. It is called by the builders before save.
 	appbuildjob.TargetVersionValidator = appbuildjobDescTargetVersion.Validators[0].(func(string) error)
 	// appbuildjobDescVersionCode is the schema descriptor for version_code field.
-	appbuildjobDescVersionCode := appbuildjobFields[5].Descriptor()
+	appbuildjobDescVersionCode := appbuildjobFields[7].Descriptor()
 	// appbuildjob.DefaultVersionCode holds the default value on creation for the version_code field.
 	appbuildjob.DefaultVersionCode = appbuildjobDescVersionCode.Default.(int)
 	// appbuildjobDescStatus is the schema descriptor for status field.
-	appbuildjobDescStatus := appbuildjobFields[6].Descriptor()
+	appbuildjobDescStatus := appbuildjobFields[8].Descriptor()
 	// appbuildjob.DefaultStatus holds the default value on creation for the status field.
 	appbuildjob.DefaultStatus = appbuildjobDescStatus.Default.(string)
 	// appbuildjobDescArtifactSize is the schema descriptor for artifact_size field.
-	appbuildjobDescArtifactSize := appbuildjobFields[15].Descriptor()
+	appbuildjobDescArtifactSize := appbuildjobFields[17].Descriptor()
 	// appbuildjob.DefaultArtifactSize holds the default value on creation for the artifact_size field.
 	appbuildjob.DefaultArtifactSize = appbuildjobDescArtifactSize.Default.(int64)
 	// appbuildjobDescDurationMs is the schema descriptor for duration_ms field.
-	appbuildjobDescDurationMs := appbuildjobFields[16].Descriptor()
+	appbuildjobDescDurationMs := appbuildjobFields[18].Descriptor()
 	// appbuildjob.DefaultDurationMs holds the default value on creation for the duration_ms field.
 	appbuildjob.DefaultDurationMs = appbuildjobDescDurationMs.Default.(int64)
 	// appbuildjobDescEnqueuedAt is the schema descriptor for enqueued_at field.
-	appbuildjobDescEnqueuedAt := appbuildjobFields[18].Descriptor()
+	appbuildjobDescEnqueuedAt := appbuildjobFields[20].Descriptor()
 	// appbuildjob.DefaultEnqueuedAt holds the default value on creation for the enqueued_at field.
 	appbuildjob.DefaultEnqueuedAt = appbuildjobDescEnqueuedAt.Default.(func() time.Time)
 	// appbuildjobDescCreatedAt is the schema descriptor for created_at field.
-	appbuildjobDescCreatedAt := appbuildjobFields[21].Descriptor()
+	appbuildjobDescCreatedAt := appbuildjobFields[23].Descriptor()
 	// appbuildjob.DefaultCreatedAt holds the default value on creation for the created_at field.
 	appbuildjob.DefaultCreatedAt = appbuildjobDescCreatedAt.Default.(func() time.Time)
 	// appbuildjobDescUpdatedAt is the schema descriptor for updated_at field.
-	appbuildjobDescUpdatedAt := appbuildjobFields[22].Descriptor()
+	appbuildjobDescUpdatedAt := appbuildjobFields[24].Descriptor()
 	// appbuildjob.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	appbuildjob.DefaultUpdatedAt = appbuildjobDescUpdatedAt.Default.(func() time.Time)
 	// appbuildjob.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
@@ -498,12 +547,114 @@ func init() {
 	appbuildjobDescID := appbuildjobFields[0].Descriptor()
 	// appbuildjob.DefaultID holds the default value on creation for the id field.
 	appbuildjob.DefaultID = appbuildjobDescID.Default.(func() uuid.UUID)
+	appdesktopbrandingMixin := schema.AppDesktopBranding{}.Mixin()
+	appdesktopbrandingMixinHooks0 := appdesktopbrandingMixin[0].Hooks()
+	appdesktopbranding.Hooks[0] = appdesktopbrandingMixinHooks0[0]
+	appdesktopbrandingMixinInters0 := appdesktopbrandingMixin[0].Interceptors()
+	appdesktopbranding.Interceptors[0] = appdesktopbrandingMixinInters0[0]
+	appdesktopbrandingFields := schema.AppDesktopBranding{}.Fields()
+	_ = appdesktopbrandingFields
+	// appdesktopbrandingDescProductName is the schema descriptor for product_name field.
+	appdesktopbrandingDescProductName := appdesktopbrandingFields[2].Descriptor()
+	// appdesktopbranding.DefaultProductName holds the default value on creation for the product_name field.
+	appdesktopbranding.DefaultProductName = appdesktopbrandingDescProductName.Default.(string)
+	// appdesktopbrandingDescBundleIdentifier is the schema descriptor for bundle_identifier field.
+	appdesktopbrandingDescBundleIdentifier := appdesktopbrandingFields[3].Descriptor()
+	// appdesktopbranding.DefaultBundleIdentifier holds the default value on creation for the bundle_identifier field.
+	appdesktopbranding.DefaultBundleIdentifier = appdesktopbrandingDescBundleIdentifier.Default.(string)
+	// appdesktopbrandingDescCreatedAt is the schema descriptor for created_at field.
+	appdesktopbrandingDescCreatedAt := appdesktopbrandingFields[4].Descriptor()
+	// appdesktopbranding.DefaultCreatedAt holds the default value on creation for the created_at field.
+	appdesktopbranding.DefaultCreatedAt = appdesktopbrandingDescCreatedAt.Default.(func() time.Time)
+	// appdesktopbrandingDescUpdatedAt is the schema descriptor for updated_at field.
+	appdesktopbrandingDescUpdatedAt := appdesktopbrandingFields[5].Descriptor()
+	// appdesktopbranding.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	appdesktopbranding.DefaultUpdatedAt = appdesktopbrandingDescUpdatedAt.Default.(func() time.Time)
+	// appdesktopbranding.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	appdesktopbranding.UpdateDefaultUpdatedAt = appdesktopbrandingDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// appdesktopbrandingDescID is the schema descriptor for id field.
+	appdesktopbrandingDescID := appdesktopbrandingFields[0].Descriptor()
+	// appdesktopbranding.DefaultID holds the default value on creation for the id field.
+	appdesktopbranding.DefaultID = appdesktopbrandingDescID.Default.(func() uuid.UUID)
+	appsourcesnapshotFields := schema.AppSourceSnapshot{}.Fields()
+	_ = appsourcesnapshotFields
+	// appsourcesnapshotDescObjectKey is the schema descriptor for object_key field.
+	appsourcesnapshotDescObjectKey := appsourcesnapshotFields[3].Descriptor()
+	// appsourcesnapshot.ObjectKeyValidator is a validator for the "object_key" field. It is called by the builders before save.
+	appsourcesnapshot.ObjectKeyValidator = appsourcesnapshotDescObjectKey.Validators[0].(func(string) error)
+	// appsourcesnapshotDescSha256 is the schema descriptor for sha256 field.
+	appsourcesnapshotDescSha256 := appsourcesnapshotFields[4].Descriptor()
+	// appsourcesnapshot.Sha256Validator is a validator for the "sha256" field. It is called by the builders before save.
+	appsourcesnapshot.Sha256Validator = appsourcesnapshotDescSha256.Validators[0].(func(string) error)
+	// appsourcesnapshotDescStatus is the schema descriptor for status field.
+	appsourcesnapshotDescStatus := appsourcesnapshotFields[7].Descriptor()
+	// appsourcesnapshot.DefaultStatus holds the default value on creation for the status field.
+	appsourcesnapshot.DefaultStatus = appsourcesnapshotDescStatus.Default.(string)
+	// appsourcesnapshotDescSuperseded is the schema descriptor for superseded field.
+	appsourcesnapshotDescSuperseded := appsourcesnapshotFields[8].Descriptor()
+	// appsourcesnapshot.DefaultSuperseded holds the default value on creation for the superseded field.
+	appsourcesnapshot.DefaultSuperseded = appsourcesnapshotDescSuperseded.Default.(bool)
+	// appsourcesnapshotDescCreatedAt is the schema descriptor for created_at field.
+	appsourcesnapshotDescCreatedAt := appsourcesnapshotFields[10].Descriptor()
+	// appsourcesnapshot.DefaultCreatedAt holds the default value on creation for the created_at field.
+	appsourcesnapshot.DefaultCreatedAt = appsourcesnapshotDescCreatedAt.Default.(func() time.Time)
+	// appsourcesnapshotDescUpdatedAt is the schema descriptor for updated_at field.
+	appsourcesnapshotDescUpdatedAt := appsourcesnapshotFields[12].Descriptor()
+	// appsourcesnapshot.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	appsourcesnapshot.DefaultUpdatedAt = appsourcesnapshotDescUpdatedAt.Default.(func() time.Time)
+	// appsourcesnapshot.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	appsourcesnapshot.UpdateDefaultUpdatedAt = appsourcesnapshotDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// appsourcesnapshotDescID is the schema descriptor for id field.
+	appsourcesnapshotDescID := appsourcesnapshotFields[0].Descriptor()
+	// appsourcesnapshot.DefaultID holds the default value on creation for the id field.
+	appsourcesnapshot.DefaultID = appsourcesnapshotDescID.Default.(func() uuid.UUID)
 	auditFields := schema.Audit{}.Fields()
 	_ = auditFields
 	// auditDescCreatedAt is the schema descriptor for created_at field.
 	auditDescCreatedAt := auditFields[7].Descriptor()
 	// audit.DefaultCreatedAt holds the default value on creation for the created_at field.
 	audit.DefaultCreatedAt = auditDescCreatedAt.Default.(func() time.Time)
+	desktopbrandingMixin := schema.DesktopBranding{}.Mixin()
+	desktopbrandingMixinHooks0 := desktopbrandingMixin[0].Hooks()
+	desktopbranding.Hooks[0] = desktopbrandingMixinHooks0[0]
+	desktopbrandingMixinInters0 := desktopbrandingMixin[0].Interceptors()
+	desktopbranding.Interceptors[0] = desktopbrandingMixinInters0[0]
+	desktopbrandingFields := schema.DesktopBranding{}.Fields()
+	_ = desktopbrandingFields
+	// desktopbrandingDescSingletonKey is the schema descriptor for singleton_key field.
+	desktopbrandingDescSingletonKey := desktopbrandingFields[1].Descriptor()
+	// desktopbranding.DefaultSingletonKey holds the default value on creation for the singleton_key field.
+	desktopbranding.DefaultSingletonKey = desktopbrandingDescSingletonKey.Default.(string)
+	// desktopbrandingDescProductName is the schema descriptor for product_name field.
+	desktopbrandingDescProductName := desktopbrandingFields[2].Descriptor()
+	// desktopbranding.DefaultProductName holds the default value on creation for the product_name field.
+	desktopbranding.DefaultProductName = desktopbrandingDescProductName.Default.(string)
+	// desktopbrandingDescBundleIdentifier is the schema descriptor for bundle_identifier field.
+	desktopbrandingDescBundleIdentifier := desktopbrandingFields[3].Descriptor()
+	// desktopbranding.DefaultBundleIdentifier holds the default value on creation for the bundle_identifier field.
+	desktopbranding.DefaultBundleIdentifier = desktopbrandingDescBundleIdentifier.Default.(string)
+	// desktopbrandingDescUpdaterEndpoint is the schema descriptor for updater_endpoint field.
+	desktopbrandingDescUpdaterEndpoint := desktopbrandingFields[4].Descriptor()
+	// desktopbranding.DefaultUpdaterEndpoint holds the default value on creation for the updater_endpoint field.
+	desktopbranding.DefaultUpdaterEndpoint = desktopbrandingDescUpdaterEndpoint.Default.(string)
+	// desktopbrandingDescIconKey is the schema descriptor for icon_key field.
+	desktopbrandingDescIconKey := desktopbrandingFields[5].Descriptor()
+	// desktopbranding.DefaultIconKey holds the default value on creation for the icon_key field.
+	desktopbranding.DefaultIconKey = desktopbrandingDescIconKey.Default.(string)
+	// desktopbrandingDescCreatedAt is the schema descriptor for created_at field.
+	desktopbrandingDescCreatedAt := desktopbrandingFields[6].Descriptor()
+	// desktopbranding.DefaultCreatedAt holds the default value on creation for the created_at field.
+	desktopbranding.DefaultCreatedAt = desktopbrandingDescCreatedAt.Default.(func() time.Time)
+	// desktopbrandingDescUpdatedAt is the schema descriptor for updated_at field.
+	desktopbrandingDescUpdatedAt := desktopbrandingFields[7].Descriptor()
+	// desktopbranding.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	desktopbranding.DefaultUpdatedAt = desktopbrandingDescUpdatedAt.Default.(func() time.Time)
+	// desktopbranding.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	desktopbranding.UpdateDefaultUpdatedAt = desktopbrandingDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// desktopbrandingDescID is the schema descriptor for id field.
+	desktopbrandingDescID := desktopbrandingFields[0].Descriptor()
+	// desktopbranding.DefaultID holds the default value on creation for the id field.
+	desktopbranding.DefaultID = desktopbrandingDescID.Default.(func() uuid.UUID)
 	entitlementFields := schema.Entitlement{}.Fields()
 	_ = entitlementFields
 	// entitlementDescTier is the schema descriptor for tier field.

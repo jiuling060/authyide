@@ -42,6 +42,17 @@ func (r *appRepo) Get(ctx context.Context, uid, id uuid.UUID) (*db.App, error) {
 	return row, nil
 }
 
+// GetByID resolves one app without an owner check, for the admin views.
+func (r *appRepo) GetByID(ctx context.Context, id uuid.UUID) (*db.App, error) {
+	row, err := r.db.App.Query().
+		Where(app.ID(id)).
+		Only(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
 func (r *appRepo) Create(ctx context.Context, uid uuid.UUID, req *domain.CreateAppReq) (*db.App, error) {
 	row, err := r.db.App.Create().
 		SetUserID(uid).
@@ -51,6 +62,7 @@ func (r *appRepo) Create(ctx context.Context, uid uuid.UUID, req *domain.CreateA
 		SetAdNetwork(req.AdNetwork).
 		SetAdAppID(req.AdAppID).
 		SetEnabledPlatforms(req.EnabledPlatforms).
+		SetNillableSourceSnapshotID(req.SourceSnapshotID).
 		SetStatus("draft").
 		Save(ctx)
 	if err != nil {
@@ -78,6 +90,13 @@ func (r *appRepo) Update(ctx context.Context, uid, id uuid.UUID, req *domain.Upd
 	}
 	if req.EnabledPlatforms != nil {
 		update = update.SetEnabledPlatforms(req.EnabledPlatforms)
+	}
+	if req.SourceSnapshotID != nil {
+		if inner := *req.SourceSnapshotID; inner != nil {
+			update = update.SetSourceSnapshotID(*inner)
+		} else {
+			update = update.ClearSourceSnapshotID()
+		}
 	}
 
 	_, err := update.Save(ctx)

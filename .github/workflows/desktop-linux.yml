@@ -20,6 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read productName from tauri config
+        run: |
+          PRODUCT_NAME=$(python3 -c 'import json; print(json.load(open("desktop/tauri.conf.json"))["productName"])')
+          echo "PRODUCT_NAME=$PRODUCT_NAME" >> "$GITHUB_ENV"
+
       # webkit2gtk-4.1 + gtk3 是构建依赖;librsvg2/patchelf 是 bundler 需要;
       # xdg-utils 不能省——AppImage bundler 会把系统的 xdg-open 复制进包,
       # 缺了会在 release 编译跑完之后才报 "xdg-open binary not found"
@@ -113,15 +118,15 @@ jobs:
           fi
           RELEASE_VERSION="${GITHUB_REF_NAME#v}"
           for f in \
-            "target/release/bundle/deb/AuthyIDE_${RELEASE_VERSION}.0.0_amd64.deb" \
-            "target/release/bundle/rpm/AuthyIDE-${RELEASE_VERSION}.0.0-1.x86_64.rpm" \
-            "target/release/bundle/appimage/AuthyIDE_${RELEASE_VERSION}.0.0_amd64.AppImage"; do
+            "target/release/bundle/deb/${PRODUCT_NAME}_${RELEASE_VERSION}.0.0_amd64.deb" \
+            "target/release/bundle/rpm/${PRODUCT_NAME}-${RELEASE_VERSION}.0.0-1.x86_64.rpm" \
+            "target/release/bundle/appimage/${PRODUCT_NAME}_${RELEASE_VERSION}.0.0_amd64.AppImage"; do
             test -f "$f" || { echo "::error::产物缺失或版本未与 tag 对齐: $f"; exit 1; }
           done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AuthyIDE-linux-x64-${{ github.ref_name }}
+          name: ${{ env.PRODUCT_NAME }}-linux-x64-${{ github.ref_name }}
           path: |
             desktop/target/release/bundle/deb/*.deb
             desktop/target/release/bundle/rpm/*.rpm

@@ -81,6 +81,11 @@ func IconKey(v string) predicate.App {
 	return predicate.App(sql.FieldEQ(FieldIconKey, v))
 }
 
+// SourceSnapshotID applies equality check predicate on the "source_snapshot_id" field. It's identical to SourceSnapshotIDEQ.
+func SourceSnapshotID(v uuid.UUID) predicate.App {
+	return predicate.App(sql.FieldEQ(FieldSourceSnapshotID, v))
+}
+
 // AdNetwork applies equality check predicate on the "ad_network" field. It's identical to AdNetworkEQ.
 func AdNetwork(v string) predicate.App {
 	return predicate.App(sql.FieldEQ(FieldAdNetwork, v))
@@ -409,6 +414,56 @@ func IconKeyEqualFold(v string) predicate.App {
 // IconKeyContainsFold applies the ContainsFold predicate on the "icon_key" field.
 func IconKeyContainsFold(v string) predicate.App {
 	return predicate.App(sql.FieldContainsFold(FieldIconKey, v))
+}
+
+// SourceSnapshotIDEQ applies the EQ predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDEQ(v uuid.UUID) predicate.App {
+	return predicate.App(sql.FieldEQ(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDNEQ applies the NEQ predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDNEQ(v uuid.UUID) predicate.App {
+	return predicate.App(sql.FieldNEQ(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDIn applies the In predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDIn(vs ...uuid.UUID) predicate.App {
+	return predicate.App(sql.FieldIn(FieldSourceSnapshotID, vs...))
+}
+
+// SourceSnapshotIDNotIn applies the NotIn predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDNotIn(vs ...uuid.UUID) predicate.App {
+	return predicate.App(sql.FieldNotIn(FieldSourceSnapshotID, vs...))
+}
+
+// SourceSnapshotIDGT applies the GT predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDGT(v uuid.UUID) predicate.App {
+	return predicate.App(sql.FieldGT(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDGTE applies the GTE predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDGTE(v uuid.UUID) predicate.App {
+	return predicate.App(sql.FieldGTE(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDLT applies the LT predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDLT(v uuid.UUID) predicate.App {
+	return predicate.App(sql.FieldLT(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDLTE applies the LTE predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDLTE(v uuid.UUID) predicate.App {
+	return predicate.App(sql.FieldLTE(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDIsNil applies the IsNil predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDIsNil() predicate.App {
+	return predicate.App(sql.FieldIsNull(FieldSourceSnapshotID))
+}
+
+// SourceSnapshotIDNotNil applies the NotNil predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDNotNil() predicate.App {
+	return predicate.App(sql.FieldNotNull(FieldSourceSnapshotID))
 }
 
 // AdNetworkEQ applies the EQ predicate on the "ad_network" field.

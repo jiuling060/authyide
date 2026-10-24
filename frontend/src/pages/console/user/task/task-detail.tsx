@@ -16,6 +16,7 @@ import { TaskStreamClient, type TaskStreamClientState, type TaskStreamCloseReaso
 import { TaskTerminalPanel } from "@/components/console/task/task-terminal-panel"
 import { TaskSkillsUpdateDialog } from "@/components/console/task/task-skills-update-dialog"
 import { TaskUserInputIndex } from "@/components/console/task/task-user-input-index"
+import { SourceSnapshotPanel } from "@/components/console/apps/source-snapshot-panel"
 import { IS_OFFLINE_EDITION } from "@/utils/edition"
 import {
   AlertDialog,
@@ -52,7 +53,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { canUseModelBySubscription, formatTokens, getBrandFromModel, getBuiltinModelName, getModelDisplayName, getOwnerTypeBadge, getTaskDisplayName, isBuiltinPublicModelPackage, stripBuiltinPublicModelPackagePrefix } from "@/utils/common"
 import { apiRequest } from "@/utils/requestUtils"
-import { IconChevronDown, IconDeviceDesktop, IconDots, IconFile, IconPuzzle, IconReload, IconTerminal2, IconUpload } from "@tabler/icons-react"
+import { IconArchive, IconChevronDown, IconDeviceDesktop, IconDots, IconFile, IconPuzzle, IconReload, IconTerminal2, IconUpload } from "@tabler/icons-react"
 import React from "react"
 import { useParams } from "react-router-dom"
 import { toast } from "sonner"
@@ -81,6 +82,7 @@ export default function TaskDetailPage() {
   const isMobile = useIsMobile()
   const [task, setTask] = React.useState<DomainProjectTask | null>(null)
   const [activeSidePanel, setActiveSidePanel] = React.useState<SidePanelType | null>(null)
+  const [snapshotDialogOpen, setSnapshotDialogOpen] = React.useState(false)
   const [terminalPanelOpen, setTerminalPanelOpen] = React.useState(false)
   const [previewDialogOpen, setPreviewDialogOpen] = React.useState(false)
   const [streamStatus, setStreamStatus] = React.useState<TaskMessageHandlerStatus>("inited")
@@ -1471,6 +1473,17 @@ export default function TaskDetailPage() {
                     <Button
                       type="button"
                       variant="ghost"
+                      className={cn("h-11 justify-start gap-2 px-3", snapshotDialogOpen && "bg-accent text-primary")}
+                      aria-label={t("taskDetail.panels.snapshot")}
+                      disabled={!taskInteractive}
+                      onClick={() => runMobileToolAction(() => setSnapshotDialogOpen(true))}
+                    >
+                      <IconArchive className="size-4 shrink-0" />
+                      <span className="truncate">{t("taskDetail.panels.snapshot")}</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
                       className={cn("h-11 justify-start gap-2 px-3", previewDialogOpen && "bg-accent text-primary")}
                       aria-label={previewPortCount > 0 ? `${t("taskDetail.panels.preview")} (${previewPortCount})` : t("taskDetail.panels.preview")}
                       disabled={!taskInteractive}
@@ -1519,6 +1532,16 @@ export default function TaskDetailPage() {
         </div>
         <div className="hidden shrink-0 md:block">
           <div className="flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-sm font-normal"
+              onClick={() => setSnapshotDialogOpen(true)}
+              disabled={!taskInteractive}
+            >
+              <IconArchive className="size-3.5 shrink-0" />
+              {t("taskDetail.panels.snapshot")}
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -1681,6 +1704,16 @@ export default function TaskDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <Dialog open={snapshotDialogOpen} onOpenChange={setSnapshotDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <div className="pt-1">
+            <SourceSnapshotPanel
+              taskId={taskId ?? ""}
+              vmId={envid ?? ""}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
       {showPreparing ? (
         <TaskPreparingView task={task} />
       ) : (

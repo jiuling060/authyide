@@ -24,6 +24,10 @@ type AppBuildJob struct {
 	UserID uuid.UUID `json:"user_id,omitempty"`
 	// AppID holds the value of the "app_id" field.
 	AppID *uuid.UUID `json:"app_id,omitempty"`
+	// SourceSnapshotID holds the value of the "source_snapshot_id" field.
+	SourceSnapshotID *uuid.UUID `json:"source_snapshot_id,omitempty"`
+	// SourceTaskID holds the value of the "source_task_id" field.
+	SourceTaskID *uuid.UUID `json:"source_task_id,omitempty"`
 	// Platform holds the value of the "platform" field.
 	Platform string `json:"platform,omitempty"`
 	// TargetVersion holds the value of the "target_version" field.
@@ -72,7 +76,7 @@ func (*AppBuildJob) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case appbuildjob.FieldAppID:
+		case appbuildjob.FieldAppID, appbuildjob.FieldSourceSnapshotID, appbuildjob.FieldSourceTaskID:
 			values[i] = &sql.NullScanner{S: new(uuid.UUID)}
 		case appbuildjob.FieldVersionCode, appbuildjob.FieldExitCode, appbuildjob.FieldArtifactSize, appbuildjob.FieldDurationMs:
 			values[i] = new(sql.NullInt64)
@@ -121,6 +125,20 @@ func (_m *AppBuildJob) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.AppID = new(uuid.UUID)
 				*_m.AppID = *value.S.(*uuid.UUID)
+			}
+		case appbuildjob.FieldSourceSnapshotID:
+			if value, ok := values[i].(*sql.NullScanner); !ok {
+				return fmt.Errorf("unexpected type %T for field source_snapshot_id", values[i])
+			} else if value.Valid {
+				_m.SourceSnapshotID = new(uuid.UUID)
+				*_m.SourceSnapshotID = *value.S.(*uuid.UUID)
+			}
+		case appbuildjob.FieldSourceTaskID:
+			if value, ok := values[i].(*sql.NullScanner); !ok {
+				return fmt.Errorf("unexpected type %T for field source_task_id", values[i])
+			} else if value.Valid {
+				_m.SourceTaskID = new(uuid.UUID)
+				*_m.SourceTaskID = *value.S.(*uuid.UUID)
 			}
 		case appbuildjob.FieldPlatform:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -290,6 +308,16 @@ func (_m *AppBuildJob) String() string {
 	builder.WriteString(", ")
 	if v := _m.AppID; v != nil {
 		builder.WriteString("app_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.SourceSnapshotID; v != nil {
+		builder.WriteString("source_snapshot_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.SourceTaskID; v != nil {
+		builder.WriteString("source_task_id=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")

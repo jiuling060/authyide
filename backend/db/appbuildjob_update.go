@@ -84,6 +84,46 @@ func (_u *AppBuildJobUpdate) ClearAppID() *AppBuildJobUpdate {
 	return _u
 }
 
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (_u *AppBuildJobUpdate) SetSourceSnapshotID(v uuid.UUID) *AppBuildJobUpdate {
+	_u.mutation.SetSourceSnapshotID(v)
+	return _u
+}
+
+// SetNillableSourceSnapshotID sets the "source_snapshot_id" field if the given value is not nil.
+func (_u *AppBuildJobUpdate) SetNillableSourceSnapshotID(v *uuid.UUID) *AppBuildJobUpdate {
+	if v != nil {
+		_u.SetSourceSnapshotID(*v)
+	}
+	return _u
+}
+
+// ClearSourceSnapshotID clears the value of the "source_snapshot_id" field.
+func (_u *AppBuildJobUpdate) ClearSourceSnapshotID() *AppBuildJobUpdate {
+	_u.mutation.ClearSourceSnapshotID()
+	return _u
+}
+
+// SetSourceTaskID sets the "source_task_id" field.
+func (_u *AppBuildJobUpdate) SetSourceTaskID(v uuid.UUID) *AppBuildJobUpdate {
+	_u.mutation.SetSourceTaskID(v)
+	return _u
+}
+
+// SetNillableSourceTaskID sets the "source_task_id" field if the given value is not nil.
+func (_u *AppBuildJobUpdate) SetNillableSourceTaskID(v *uuid.UUID) *AppBuildJobUpdate {
+	if v != nil {
+		_u.SetSourceTaskID(*v)
+	}
+	return _u
+}
+
+// ClearSourceTaskID clears the value of the "source_task_id" field.
+func (_u *AppBuildJobUpdate) ClearSourceTaskID() *AppBuildJobUpdate {
+	_u.mutation.ClearSourceTaskID()
+	return _u
+}
+
 // SetPlatform sets the "platform" field.
 func (_u *AppBuildJobUpdate) SetPlatform(v string) *AppBuildJobUpdate {
 	_u.mutation.SetPlatform(v)
@@ -545,6 +585,18 @@ func (_u *AppBuildJobUpdate) sqlSave(ctx context.Context) (_node int, err error)
 	if _u.mutation.AppIDCleared() {
 		_spec.ClearField(appbuildjob.FieldAppID, field.TypeUUID)
 	}
+	if value, ok := _u.mutation.SourceSnapshotID(); ok {
+		_spec.SetField(appbuildjob.FieldSourceSnapshotID, field.TypeUUID, value)
+	}
+	if _u.mutation.SourceSnapshotIDCleared() {
+		_spec.ClearField(appbuildjob.FieldSourceSnapshotID, field.TypeUUID)
+	}
+	if value, ok := _u.mutation.SourceTaskID(); ok {
+		_spec.SetField(appbuildjob.FieldSourceTaskID, field.TypeUUID, value)
+	}
+	if _u.mutation.SourceTaskIDCleared() {
+		_spec.ClearField(appbuildjob.FieldSourceTaskID, field.TypeUUID)
+	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(appbuildjob.FieldPlatform, field.TypeString, value)
 	}
@@ -723,6 +775,46 @@ func (_u *AppBuildJobUpdateOne) SetNillableAppID(v *uuid.UUID) *AppBuildJobUpdat
 // ClearAppID clears the value of the "app_id" field.
 func (_u *AppBuildJobUpdateOne) ClearAppID() *AppBuildJobUpdateOne {
 	_u.mutation.ClearAppID()
+	return _u
+}
+
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (_u *AppBuildJobUpdateOne) SetSourceSnapshotID(v uuid.UUID) *AppBuildJobUpdateOne {
+	_u.mutation.SetSourceSnapshotID(v)
+	return _u
+}
+
+// SetNillableSourceSnapshotID sets the "source_snapshot_id" field if the given value is not nil.
+func (_u *AppBuildJobUpdateOne) SetNillableSourceSnapshotID(v *uuid.UUID) *AppBuildJobUpdateOne {
+	if v != nil {
+		_u.SetSourceSnapshotID(*v)
+	}
+	return _u
+}
+
+// ClearSourceSnapshotID clears the value of the "source_snapshot_id" field.
+func (_u *AppBuildJobUpdateOne) ClearSourceSnapshotID() *AppBuildJobUpdateOne {
+	_u.mutation.ClearSourceSnapshotID()
+	return _u
+}
+
+// SetSourceTaskID sets the "source_task_id" field.
+func (_u *AppBuildJobUpdateOne) SetSourceTaskID(v uuid.UUID) *AppBuildJobUpdateOne {
+	_u.mutation.SetSourceTaskID(v)
+	return _u
+}
+
+// SetNillableSourceTaskID sets the "source_task_id" field if the given value is not nil.
+func (_u *AppBuildJobUpdateOne) SetNillableSourceTaskID(v *uuid.UUID) *AppBuildJobUpdateOne {
+	if v != nil {
+		_u.SetSourceTaskID(*v)
+	}
+	return _u
+}
+
+// ClearSourceTaskID clears the value of the "source_task_id" field.
+func (_u *AppBuildJobUpdateOne) ClearSourceTaskID() *AppBuildJobUpdateOne {
+	_u.mutation.ClearSourceTaskID()
 	return _u
 }
 
@@ -1216,6 +1308,18 @@ func (_u *AppBuildJobUpdateOne) sqlSave(ctx context.Context) (_node *AppBuildJob
 	}
 	if _u.mutation.AppIDCleared() {
 		_spec.ClearField(appbuildjob.FieldAppID, field.TypeUUID)
+	}
+	if value, ok := _u.mutation.SourceSnapshotID(); ok {
+		_spec.SetField(appbuildjob.FieldSourceSnapshotID, field.TypeUUID, value)
+	}
+	if _u.mutation.SourceSnapshotIDCleared() {
+		_spec.ClearField(appbuildjob.FieldSourceSnapshotID, field.TypeUUID)
+	}
+	if value, ok := _u.mutation.SourceTaskID(); ok {
+		_spec.SetField(appbuildjob.FieldSourceTaskID, field.TypeUUID, value)
+	}
+	if _u.mutation.SourceTaskIDCleared() {
+		_spec.ClearField(appbuildjob.FieldSourceTaskID, field.TypeUUID)
 	}
 	if value, ok := _u.mutation.Platform(); ok {
 		_spec.SetField(appbuildjob.FieldPlatform, field.TypeString, value)

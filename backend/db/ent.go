@@ -24,8 +24,12 @@ import (
 	"github.com/chaitin/MonkeyCode/backend/db/agentsyncjob"
 	"github.com/chaitin/MonkeyCode/backend/db/app"
 	"github.com/chaitin/MonkeyCode/backend/db/appbranding"
+	"github.com/chaitin/MonkeyCode/backend/db/appbuildartifact"
 	"github.com/chaitin/MonkeyCode/backend/db/appbuildjob"
+	"github.com/chaitin/MonkeyCode/backend/db/appdesktopbranding"
+	"github.com/chaitin/MonkeyCode/backend/db/appsourcesnapshot"
 	"github.com/chaitin/MonkeyCode/backend/db/audit"
+	"github.com/chaitin/MonkeyCode/backend/db/desktopbranding"
 	"github.com/chaitin/MonkeyCode/backend/db/entitlement"
 	"github.com/chaitin/MonkeyCode/backend/db/gitbot"
 	"github.com/chaitin/MonkeyCode/backend/db/gitbottask"
@@ -143,8 +147,12 @@ func checkColumn(t, c string) error {
 			agentsyncjob.Table:                agentsyncjob.ValidColumn,
 			app.Table:                         app.ValidColumn,
 			appbranding.Table:                 appbranding.ValidColumn,
+			appbuildartifact.Table:            appbuildartifact.ValidColumn,
 			appbuildjob.Table:                 appbuildjob.ValidColumn,
+			appdesktopbranding.Table:          appdesktopbranding.ValidColumn,
+			appsourcesnapshot.Table:           appsourcesnapshot.ValidColumn,
 			audit.Table:                       audit.ValidColumn,
+			desktopbranding.Table:             desktopbranding.ValidColumn,
 			entitlement.Table:                 entitlement.ValidColumn,
 			gitbot.Table:                      gitbot.ValidColumn,
 			gitbottask.Table:                  gitbottask.ValidColumn,

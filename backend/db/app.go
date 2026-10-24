@@ -30,6 +30,8 @@ type App struct {
 	PackageID string `json:"package_id,omitempty"`
 	// IconKey holds the value of the "icon_key" field.
 	IconKey string `json:"icon_key,omitempty"`
+	// SourceSnapshotID holds the value of the "source_snapshot_id" field.
+	SourceSnapshotID *uuid.UUID `json:"source_snapshot_id,omitempty"`
 	// AdNetwork holds the value of the "ad_network" field.
 	AdNetwork string `json:"ad_network,omitempty"`
 	// AdAppID holds the value of the "ad_app_id" field.
@@ -85,6 +87,8 @@ func (*App) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case app.FieldSourceSnapshotID:
+			values[i] = &sql.NullScanner{S: new(uuid.UUID)}
 		case app.FieldEnabledPlatforms:
 			values[i] = new([]byte)
 		case app.FieldLocked:
@@ -147,6 +151,13 @@ func (_m *App) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field icon_key", values[i])
 			} else if value.Valid {
 				_m.IconKey = value.String
+			}
+		case app.FieldSourceSnapshotID:
+			if value, ok := values[i].(*sql.NullScanner); !ok {
+				return fmt.Errorf("unexpected type %T for field source_snapshot_id", values[i])
+			} else if value.Valid {
+				_m.SourceSnapshotID = new(uuid.UUID)
+				*_m.SourceSnapshotID = *value.S.(*uuid.UUID)
 			}
 		case app.FieldAdNetwork:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -278,6 +289,11 @@ func (_m *App) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("icon_key=")
 	builder.WriteString(_m.IconKey)
+	builder.WriteString(", ")
+	if v := _m.SourceSnapshotID; v != nil {
+		builder.WriteString("source_snapshot_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	builder.WriteString("ad_network=")
 	builder.WriteString(_m.AdNetwork)

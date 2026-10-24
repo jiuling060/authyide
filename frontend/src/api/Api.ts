@@ -2537,9 +2537,45 @@ export interface DomainApp {
   locked?: boolean;
   name?: string;
   package_id?: string;
+  source_snapshot_id?: string;
   status?: string;
   tier?: string;
   updated_at?: string;
+}
+
+export interface DomainSnapshot {
+  id?: string;
+  user_id?: string;
+  task_id?: string;
+  object_key?: string;
+  sha256?: string;
+  size_bytes?: number;
+  file_count?: number;
+  status?: string;
+  superseded?: boolean;
+  error?: string;
+  created_at?: string;
+  updated_at?: string;
+  completed_at?: string;
+  stale?: boolean;
+  task_title?: string;
+}
+
+export interface DomainArchiveInfo {
+  file_count: number;
+  size_bytes: number;
+}
+
+export interface DomainPresignSnapshotReq {
+  task_id: string;
+  archive: DomainArchiveInfo;
+  file_name: string;
+}
+
+export interface DomainPresignSnapshotResp {
+  snapshot?: DomainSnapshot;
+  upload_url?: string;
+  access_url?: string;
 }
 
 export interface DomainListAppsResp {
@@ -2566,6 +2602,19 @@ export interface DomainAppBuildJob {
   started_at?: string;
   finished_at?: string;
   artifact_download_url?: string;
+  source_snapshot_id?: string;
+  source_task_title?: string;
+  /** Every channel of a succeeded job, so the panel can offer one download and one publish action per package. */
+  artifacts?: DomainAppBuildArtifactInfo[];
+}
+
+export interface DomainAppBuildArtifactInfo {
+  channel: string;
+  file_name?: string;
+  size?: number;
+  sha256?: string;
+  download_url?: string;
+  publishable?: boolean;
 }
 
 export interface DomainAppBuildRelease {
@@ -8293,6 +8342,36 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
         ...params,
       }),
 
+    v1UsersAppsIconUpload: (id: string, file: File, params: RequestParams = {}) =>
+      this.request<GithubComGoYokoWebResp, GithubComGoYokoWebResp>({
+        path: `/api/v1/users/apps/${id}/icon`,
+        method: "POST",
+        body: { file },
+        secure: true,
+        type: ContentType.FormData,
+        format: "json",
+        ...params,
+      }),
+
+    v1UsersAppsIconDownload: (id: string, params: RequestParams = {}) =>
+      this.request<Response, GithubComGoYokoWebResp>({
+        path: `/api/v1/users/apps/${id}/icon`,
+        method: "GET",
+        secure: true,
+        type: ContentType.Json,
+        ...params,
+      }),
+
+    v1UsersAppsIconDelete: (id: string, params: RequestParams = {}) =>
+      this.request<GithubComGoYokoWebResp, GithubComGoYokoWebResp>({
+        path: `/api/v1/users/apps/${id}/icon`,
+        method: "DELETE",
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
     v1UsersAppsAdNetworksList: (params: RequestParams = {}) =>
       this.request<
         GithubComGoYokoWebResp & {
@@ -8358,16 +8437,17 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
         ...params,
       }),
 
-    v1UsersAppsBuildsDownload: (jobId: string, params: RequestParams = {}) =>
+    v1UsersAppsBuildsDownload: (jobId: string, channel?: string, params: RequestParams = {}) =>
       this.request<Response, GithubComGoYokoWebResp>({
         path: `/api/v1/users/apps/builds/${jobId}/download`,
         method: "GET",
+        query: channel ? { channel } : undefined,
         secure: true,
         type: ContentType.Json,
         ...params,
       }),
 
-    v1UsersAppsBuildsPublish: (jobId: string, params: RequestParams = {}) =>
+    v1UsersAppsBuildsPublish: (jobId: string, channel?: string, params: RequestParams = {}) =>
       this.request<
         GithubComGoYokoWebResp & {
           data?: DomainAppBuildRelease;
@@ -8376,6 +8456,7 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
       >({
         path: `/api/v1/users/apps/builds/${jobId}/publish`,
         method: "POST",
+        body: channel ? { channel } : undefined,
         secure: true,
         type: ContentType.Json,
         format: "json",
@@ -8386,6 +8467,141 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
       this.request<GithubComGoYokoWebResp, GithubComGoYokoWebResp>({
         path: `/api/v1/users/apps/builds/${jobId}`,
         method: "DELETE",
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    // ---- Session source snapshot methods (injected) ----
+    // v1UsersFilesDownloadRaw streams a VM file without JSON-decoding the body.
+    v1UsersFilesDownloadRaw: (
+      query: { id: string; path: string; filename?: string },
+      params: RequestParams = {},
+    ) =>
+      this.request<Response, GithubComGoYokoWebResp>({
+        path: `/api/v1/users/files/download`,
+        method: "GET",
+        query: query,
+        secure: true,
+        type: ContentType.Json,
+        ...params,
+      }),
+
+    v1UsersSnapshotsUploadCreate: (      req: DomainPresignSnapshotReq,
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        GithubComGoYokoWebResp & {
+          data?: DomainPresignSnapshotResp;
+        },
+        GithubComGoYokoWebResp
+      >({
+        path: `/api/v1/users/snapshots/upload`,
+        method: "POST",
+        body: req,
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    v1UsersSnapshotsCompleteCreate: (
+      id: string,
+      req: { sha256: string },
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        GithubComGoYokoWebResp & {
+          data?: DomainSnapshot;
+        },
+        GithubComGoYokoWebResp
+      >({
+        path: `/api/v1/users/snapshots/complete`,
+        method: "POST",
+        body: { id, ...req },
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    v1UsersSnapshotsFailCreate: (
+      id: string,
+      req: { error?: string } = {},
+      params: RequestParams = {},
+    ) =>
+      this.request<GithubComGoYokoWebResp, GithubComGoYokoWebResp>({
+        path: `/api/v1/users/snapshots/${id}/fail`,
+        method: "POST",
+        body: req,
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    v1UsersSnapshotsList: (query: { limit?: number } = {}, params: RequestParams = {}) =>
+      this.request<
+        GithubComGoYokoWebResp & {
+          data?: DomainSnapshot[];
+        },
+        GithubComGoYokoWebResp
+      >({
+        path: `/api/v1/users/snapshots`,
+        method: "GET",
+        query: query,
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    v1UsersSnapshotsGet: (id: string, params: RequestParams = {}) =>
+      this.request<
+        GithubComGoYokoWebResp & {
+          data?: DomainSnapshot;
+        },
+        GithubComGoYokoWebResp
+      >({
+        path: `/api/v1/users/snapshots/${id}`,
+        method: "GET",
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    v1UsersSnapshotsCurrentGet: (query: { task_id: string }, params: RequestParams = {}) =>
+      this.request<
+        GithubComGoYokoWebResp & {
+          data?: DomainSnapshot;
+        },
+        GithubComGoYokoWebResp
+      >({
+        path: `/api/v1/users/snapshots/current`,
+        method: "GET",
+        query: query,
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    v1UsersAppsSourceUpdate: (
+      id: string,
+      req: { source_snapshot_id?: string },
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        GithubComGoYokoWebResp & {
+          data?: DomainApp;
+        },
+        GithubComGoYokoWebResp
+      >({
+        path: `/api/v1/users/apps/${id}/source`,
+        method: "PUT",
+        body: req,
         secure: true,
         type: ContentType.Json,
         format: "json",
@@ -8462,6 +8678,62 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
         ...params,
       }),
 
+    v1AdminAppBuilderDesktopBrandingList: (params: RequestParams = {}) =>
+      this.request<GithubComGoYokoWebResp, GithubComGoYokoWebResp>({
+        path: `/api/v1/admin/app-builder/desktop/branding`,
+        method: "GET",
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    v1AdminAppBuilderDesktopBrandingUpdate: (
+      req: {
+        product_name?: string;
+        bundle_identifier?: string;
+        updater_endpoint?: string;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<GithubComGoYokoWebResp, GithubComGoYokoWebResp>({
+        path: `/api/v1/admin/app-builder/desktop/branding`,
+        method: "PUT",
+        body: req,
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    v1AdminAppBuilderDesktopBrandingAssetCreate: (
+      file: File,
+      params: RequestParams = {},
+    ) =>
+      this.request<GithubComGoYokoWebResp, GithubComGoYokoWebResp>({
+        path: `/api/v1/admin/app-builder/desktop/branding/assets`,
+        method: "POST",
+        body: { file },
+        secure: true,
+        type: ContentType.FormData,
+        format: "json",
+        ...params,
+      }),
+
+    v1AdminAppBuilderDesktopBrandingAssetDelete: (
+      slot: string,
+      params: RequestParams = {},
+    ) =>
+      this.request<GithubComGoYokoWebResp, GithubComGoYokoWebResp>({
+        path: `/api/v1/admin/app-builder/desktop/branding/assets`,
+        method: "DELETE",
+        query: { slot },
+        secure: true,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
     v1AdminAppBuilderBuildsList: (
       query?: { limit?: number },
       params: RequestParams = {},
@@ -8477,7 +8749,7 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
       }),
 
     v1AdminAppBuilderBuildsCreate: (
-      req: { platform: string; version: string; version_code: number },
+      req: { platform: string; version: string; version_code: number; app_id?: string },
       params: RequestParams = {},
     ) =>
       this.request<GithubComGoYokoWebResp, GithubComGoYokoWebResp>({
@@ -8500,19 +8772,29 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
         ...params,
       }),
 
-    v1AdminAppBuilderBuildsDownload: (id: string, params: RequestParams = {}) =>
+    v1AdminAppBuilderBuildsDownload: (
+      id: string,
+      channel?: string,
+      params: RequestParams = {},
+    ) =>
       this.request<Response, GithubComGoYokoWebResp>({
         path: `/api/v1/admin/app-builder/builds/${id}/download`,
         method: "GET",
+        query: channel ? { channel } : undefined,
         secure: true,
         type: ContentType.Json,
         ...params,
       }),
 
-    v1AdminAppBuilderBuildsPublish: (id: string, params: RequestParams = {}) =>
+    v1AdminAppBuilderBuildsPublish: (
+      id: string,
+      channel?: string,
+      params: RequestParams = {},
+    ) =>
       this.request<GithubComGoYokoWebResp, GithubComGoYokoWebResp>({
         path: `/api/v1/admin/app-builder/builds/${id}/publish`,
         method: "POST",
+        query: channel ? { channel } : undefined,
         secure: true,
         type: ContentType.Json,
         format: "json",

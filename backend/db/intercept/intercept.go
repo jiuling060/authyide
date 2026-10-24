@@ -20,8 +20,12 @@ import (
 	"github.com/chaitin/MonkeyCode/backend/db/agentsyncjob"
 	"github.com/chaitin/MonkeyCode/backend/db/app"
 	"github.com/chaitin/MonkeyCode/backend/db/appbranding"
+	"github.com/chaitin/MonkeyCode/backend/db/appbuildartifact"
 	"github.com/chaitin/MonkeyCode/backend/db/appbuildjob"
+	"github.com/chaitin/MonkeyCode/backend/db/appdesktopbranding"
+	"github.com/chaitin/MonkeyCode/backend/db/appsourcesnapshot"
 	"github.com/chaitin/MonkeyCode/backend/db/audit"
+	"github.com/chaitin/MonkeyCode/backend/db/desktopbranding"
 	"github.com/chaitin/MonkeyCode/backend/db/entitlement"
 	"github.com/chaitin/MonkeyCode/backend/db/gitbot"
 	"github.com/chaitin/MonkeyCode/backend/db/gitbottask"
@@ -450,6 +454,33 @@ func (f TraverseAppBranding) Traverse(ctx context.Context, q db.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *db.AppBrandingQuery", q)
 }
 
+// The AppBuildArtifactFunc type is an adapter to allow the use of ordinary function as a Querier.
+type AppBuildArtifactFunc func(context.Context, *db.AppBuildArtifactQuery) (db.Value, error)
+
+// Query calls f(ctx, q).
+func (f AppBuildArtifactFunc) Query(ctx context.Context, q db.Query) (db.Value, error) {
+	if q, ok := q.(*db.AppBuildArtifactQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *db.AppBuildArtifactQuery", q)
+}
+
+// The TraverseAppBuildArtifact type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseAppBuildArtifact func(context.Context, *db.AppBuildArtifactQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseAppBuildArtifact) Intercept(next db.Querier) db.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseAppBuildArtifact) Traverse(ctx context.Context, q db.Query) error {
+	if q, ok := q.(*db.AppBuildArtifactQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *db.AppBuildArtifactQuery", q)
+}
+
 // The AppBuildJobFunc type is an adapter to allow the use of ordinary function as a Querier.
 type AppBuildJobFunc func(context.Context, *db.AppBuildJobQuery) (db.Value, error)
 
@@ -477,6 +508,60 @@ func (f TraverseAppBuildJob) Traverse(ctx context.Context, q db.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *db.AppBuildJobQuery", q)
 }
 
+// The AppDesktopBrandingFunc type is an adapter to allow the use of ordinary function as a Querier.
+type AppDesktopBrandingFunc func(context.Context, *db.AppDesktopBrandingQuery) (db.Value, error)
+
+// Query calls f(ctx, q).
+func (f AppDesktopBrandingFunc) Query(ctx context.Context, q db.Query) (db.Value, error) {
+	if q, ok := q.(*db.AppDesktopBrandingQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *db.AppDesktopBrandingQuery", q)
+}
+
+// The TraverseAppDesktopBranding type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseAppDesktopBranding func(context.Context, *db.AppDesktopBrandingQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseAppDesktopBranding) Intercept(next db.Querier) db.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseAppDesktopBranding) Traverse(ctx context.Context, q db.Query) error {
+	if q, ok := q.(*db.AppDesktopBrandingQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *db.AppDesktopBrandingQuery", q)
+}
+
+// The AppSourceSnapshotFunc type is an adapter to allow the use of ordinary function as a Querier.
+type AppSourceSnapshotFunc func(context.Context, *db.AppSourceSnapshotQuery) (db.Value, error)
+
+// Query calls f(ctx, q).
+func (f AppSourceSnapshotFunc) Query(ctx context.Context, q db.Query) (db.Value, error) {
+	if q, ok := q.(*db.AppSourceSnapshotQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *db.AppSourceSnapshotQuery", q)
+}
+
+// The TraverseAppSourceSnapshot type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseAppSourceSnapshot func(context.Context, *db.AppSourceSnapshotQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseAppSourceSnapshot) Intercept(next db.Querier) db.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseAppSourceSnapshot) Traverse(ctx context.Context, q db.Query) error {
+	if q, ok := q.(*db.AppSourceSnapshotQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *db.AppSourceSnapshotQuery", q)
+}
+
 // The AuditFunc type is an adapter to allow the use of ordinary function as a Querier.
 type AuditFunc func(context.Context, *db.AuditQuery) (db.Value, error)
 
@@ -502,6 +587,33 @@ func (f TraverseAudit) Traverse(ctx context.Context, q db.Query) error {
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *db.AuditQuery", q)
+}
+
+// The DesktopBrandingFunc type is an adapter to allow the use of ordinary function as a Querier.
+type DesktopBrandingFunc func(context.Context, *db.DesktopBrandingQuery) (db.Value, error)
+
+// Query calls f(ctx, q).
+func (f DesktopBrandingFunc) Query(ctx context.Context, q db.Query) (db.Value, error) {
+	if q, ok := q.(*db.DesktopBrandingQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *db.DesktopBrandingQuery", q)
+}
+
+// The TraverseDesktopBranding type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseDesktopBranding func(context.Context, *db.DesktopBrandingQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseDesktopBranding) Intercept(next db.Querier) db.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseDesktopBranding) Traverse(ctx context.Context, q db.Query) error {
+	if q, ok := q.(*db.DesktopBrandingQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *db.DesktopBrandingQuery", q)
 }
 
 // The EntitlementFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -1746,10 +1858,18 @@ func NewQuery(q db.Query) (Query, error) {
 		return &query[*db.AppQuery, predicate.App, app.OrderOption]{typ: db.TypeApp, tq: q}, nil
 	case *db.AppBrandingQuery:
 		return &query[*db.AppBrandingQuery, predicate.AppBranding, appbranding.OrderOption]{typ: db.TypeAppBranding, tq: q}, nil
+	case *db.AppBuildArtifactQuery:
+		return &query[*db.AppBuildArtifactQuery, predicate.AppBuildArtifact, appbuildartifact.OrderOption]{typ: db.TypeAppBuildArtifact, tq: q}, nil
 	case *db.AppBuildJobQuery:
 		return &query[*db.AppBuildJobQuery, predicate.AppBuildJob, appbuildjob.OrderOption]{typ: db.TypeAppBuildJob, tq: q}, nil
+	case *db.AppDesktopBrandingQuery:
+		return &query[*db.AppDesktopBrandingQuery, predicate.AppDesktopBranding, appdesktopbranding.OrderOption]{typ: db.TypeAppDesktopBranding, tq: q}, nil
+	case *db.AppSourceSnapshotQuery:
+		return &query[*db.AppSourceSnapshotQuery, predicate.AppSourceSnapshot, appsourcesnapshot.OrderOption]{typ: db.TypeAppSourceSnapshot, tq: q}, nil
 	case *db.AuditQuery:
 		return &query[*db.AuditQuery, predicate.Audit, audit.OrderOption]{typ: db.TypeAudit, tq: q}, nil
+	case *db.DesktopBrandingQuery:
+		return &query[*db.DesktopBrandingQuery, predicate.DesktopBranding, desktopbranding.OrderOption]{typ: db.TypeDesktopBranding, tq: q}, nil
 	case *db.EntitlementQuery:
 		return &query[*db.EntitlementQuery, predicate.Entitlement, entitlement.OrderOption]{typ: db.TypeEntitlement, tq: q}, nil
 	case *db.GitBotQuery:

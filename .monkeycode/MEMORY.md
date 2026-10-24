@@ -230,6 +230,41 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - 移动端后端地址的唯一权威来源是 `app.json` 的 `extra.baseUrl`（`src/api/client.ts` 从 `Constants.expoConfig.extra.baseUrl` 读取）；`expo-build-properties` 插件的 `android.usesCleartextTraffic` 决定是否放行明文 HTTP；`updates.enabled` 必须显式关闭，否则 OTA manifest 域名一旦可解析并被人抢占，APP 会拉取并执行第三方 JS（供应链风险）。改部署地址只动 `app.json`，不要改 `client.ts` 里的字面量。
   - 校验 APK 是否真的能连后端的三项检查：`unzip -l` 看 `assets/index.android.bundle` 是否存在；`unzip -p APK assets/app.config` 看 `extra.baseUrl`；`aapt2 dump xmltree --file AndroidManifest.xml APK | grep -iE 'usesCleartext|networkSecurity'` 看明文流量放行（Android 9+ 默认拦截明文 HTTP，此项缺失则 APP 装得上但连不上后端）。
 
+[本机 Android 构建的失败模式与 Gradle 9 变化]
+- Date: 2026-10-22
+- Context: Agent 在本机尝试 `assembleDebug` 给真机测试包时发现
+- Category: 构建方法|排错调试|环境配置
+- Instructions:
+  - 沙箱在不同会话间会重置，本机工具链必须先探再信：2026-10-22 复查时 `/opt/android-sdk`、`mobile/node_modules` 均不存在（本条上节记录的「已全部补齐」已失效），`docker` 也没有；只有 `/usr/lib/jvm/java-17-openjdk-amd64`（openjdk 17.0.20.1）、`~/.gradle`（1.7G `modules-2` 缓存保留）、`~/.npm` 幸存。重装成本：SDK 750M（cmdline-tools 11076708 + platform-tools + platforms;android-35/36 + build-tools;35.0.0/36.0.0）+ `npm ci` 1059 包 / 747M / 2 分钟。
+  - **本机根分区 20G 极易打满**（实测 19G 已用、480M 可用，`df` 在满盘时也会给出可读数字）。`assembleRelease` 一定放服务器。临时腾盘只能靠 `mv` 挪走自己放的缓存（`rm` 受禁止删除约束），`/dev/shm` 的 1.6G Go 缓存（`/dev/shm/go-tmp/gocache`）腾不出、也不可搬到根盘。
+  - Gradle 9.0.0 **仍支持** `--no-daemon`（`./gradlew --help | grep -- "--no-daemon"` 可确认），`org.gradle.daemon=false` 已不是合法属性，不要写进 `gradle.properties`。
+  - `android.enableR8=false` 在 AGP 7.0 已被移除，写在 `gradle.properties` 会让整个 `:app` 配置直接失败（`Failed to apply plugin 'com.android.internal.application' > The option 'android.enableR8' is deprecated. It was removed in version 7.0`）。release 默认不走 R8，无需该属性。
+  - 把工作区放到 `/dev/shm` 只能把 `android/build`、`app/build` 移出根盘；`settings.gradle` 的 `includeBuild` 会到 `node_modules` 里编译 expo / react-native 的 gradle 插件，产物落在 `node_modules` 内（本次在根盘），所以 `/dev/shm` 方案对根盘压力只是部分缓解。
+  - `cp -al` 跨文件系统（根盘 → `/dev/shm` tmpfs）直接报 `Invalid cross-device link`；要把热缓存「搬到」tmpfs 又复用原数据，只能用 `ln -s` 软链（`ln -sfn` 在目标已存在为目录时会先 `mv` 走旧目录再建链）。
+   - Expo/RN gradle 插件编译阶段约 6 分钟、32 个 task，是第一次配置的成本；同参数重试会 UP-TO-DATE，所以调试 `gradle.properties` 时先看是否已有缓存，别急着换方案。
+
+[release APK 未签名：prebuild 会把签名配置冲掉]
+- Date: 2026-10-23
+- Category: 构建方法|排错调试|运维部署
+- Instructions:
+  - **`./gradlew assembleRelease` 出来的 APK 可能是无签名的，装上就会失败**。`expo prebuild` 每次都用 RN 模板重写 `android/app/build.gradle`，而模板的 `release` buildType 里只有 `signingConfigs.debug` 这一行会被 prebuild 冲掉；缺了它 gradle 不会报错，直接产出「看起来完全正常」的 APK：有 `assets/index.android.bundle`、有 `assets/app.config`、有 4 个 dex、大小与上一版一致，唯独没有签名。必须校验签名而不是只校验 bundle。
+  - **构建脚本里两处兜底都建议保留**：prebuild 之后把 `signingConfig signingConfigs.debug` 补回 `release {` 块（`awk` 幂等插入，同时断言 `android/app/debug.keystore` 存在）；`assembleRelease` 之后若检测不到签名，就用 `zipalign -p -f 4` + `apksigner sign --v1/v2/v3` 加一个自建 keystore（`keytool -genkeypair` 生成，`/root/apk-side-load.keystore`）重签。
+  - **判签名的唯一可靠方式是 `apksigner verify`**，不要自己扫字节。APK Signing Block 的魔数在 build-tools 36.0.0 产物里是 `APK Sig Block 42` 后跟 **`\x00` 而不是 `\n`**，用 `b'APK Sig Block 42\n'` 搜会得到 false negative。判法：`apksigner verify -v APK | grep -E "^Verifies|Verified using v"`，看到 `Verifies` 与 `v2: true` 即可（minSdk 24 只需 v2）。同时确认 `v1 scheme` 状态——`--v1-signing-enabled true` 在 build-tools 36.0.0 下仍可能报 `v1: false` 却在 META-INF 里留下 `.SF/.RSA`，两者不一致时以 verify 输出为准。
+  - **构建工作目录是 `android/`，不是项目根**：`gradlew` 在 `android/gradlew`。从 `mobile/` 根直接 `./gradlew assembleRelease` 会报 `./gradlew: No such file or directory` 并被误判为 prebuild 失败——真正的失败点其实是 cwd。
+  - **发布完成可以用 HTTP 探测，不必烧 SSH**：`curl -D - -o /dev/null http://38.39.30.160/static/authyide.apk` 读 `Last-Modified`，发布一发生该头立刻变成当前时间；HEAD 在该 nginx 上返回 405，必须用 GET（或 `-r 0-2047` 范围请求）取响应头。构建长跑期间用它轮询比 SSH 取日志安全得多。
+  - 产物入库位置是 `Artifacts/`（`.gitignore:14` 已忽略该目录，已有 `app-debug.apk`），例如 `Artifacts/authyide-android.apk`，用户可从文件面板直接下载，不必等 SSH 把文件推上服务器。
+
+
+[正确性属性 1/2/5 的单测落点]
+- Date: 2026-10-22
+- Context: Agent 为会话源码打包补正确性属性验证时写入
+- Category: 测试方法
+- Instructions:
+  - `backend/biz/mobilebuild/runner/overlay_test.go` 现有 `fakeObjectSource`（`GetObject` 返回单个 tar.gz body）与 `overlaySourceRunner`，可在不接对象存储的情况下驱动 `overlaySource` + `rewriteConfig`；`domain.SourceSnapshot.SHA256` 传空串即跳过摘要校验，传错值即触发 fail-closed 分支。
+  - 属性 1（品牌优先）用「先 `overlaySource` 再 `rewriteConfig`」的顺序测试表达，断言 `app.json` 六个字段全部来自 `Config`；属性 2（模板独有文件存活）断言 `android/gradlew` 与 `plugins/withAlipayLogin/index.ts` 覆盖后仍在；属性 5（fail-closed）用 `listFiles` 前后对比断言工作区逐字节未变。
+  - `Runner` 的 `logger` 字段不可为 nil（`NewRunner` 里 `logger.With(...)`），测试用 `slog.New(slog.DiscardHandler)`。
+  - 跑单个包：`cd backend && GOTMPDIR=/dev/shm/go-tmp GOCACHE=/dev/shm/go-tmp/gocache CGO_ENABLED=0 go test -p 1 ./biz/mobilebuild/runner/`（约 0.2s）。
+
 [后端邮件与 OAuth 的 base_url 硬依赖]
 - Date: 2026-10-19
 - Context: Agent 放开登录页「注册」「忘记密码」offline 门禁后发现
@@ -248,6 +283,7 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
 - Instructions:
   - 所有密码类凭据（数据库口令、ClickHouse 口令、对象存储 access key secret、SMTP 授权码、管理员初始口令、TaskFlow 回调令牌）一律加密存储，禁止明文写进 `docker-compose.yml` 或任何会被同步/备份/查看的配置文件。
   - 禁止「本地构建产物 + 打包 tarball + SSH 上传」的部署方式；构建、加密、配置修改、部署全部在目标服务器上直接执行。
+  - **不做本地预览部署**（2026-10-22 用户重申）：不要起前端 dev server、不要跑 `npm run dev` / `pnpm run dev:online` 之类的本地服务来给预览链接，也不要调用 `deploy-website` skill。所有改动直接在 38.39.30.160 上构建与部署，验收通过 SSH 在服务器上 `curl` 站点完成。
   - 每次改动后必须核验服务端实际运行版本，不能只看部署脚本退出码：`docker image inspect --format '{{.Created}}'` 对比源码 mtime，前端按文件 sha256 逐一对比，避免缓存命中导致旧镜像/旧 dist 继续运行。
   - 服务器现有工具链：Node v20.20.2、pnpm 9.12.3、Docker 29.8.2（legacy builder）、无 Go（Go 只在镜像内编译）、有 python3、有 openssl；`age` 未安装。
   - 服务器宿主机 RAM 是 **15.6GiB**（`free -m`），3.89GiB 那档是本机终端 cgroup 上限，不是主机内存；服务器上 `NODE_OPTIONS=--max-old-space-size=10929` 的 Vite 构建 3m1s 跑通，`tsc -b` 0 错误。
@@ -314,7 +350,12 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - **服务器已有桌面工作区但无桌面工具链**：`/opt/authyide/src/desktop`（819 条目，Oct 15 同步，早于本机最新版本）、`/opt/authyide/src/browser-extension`、`/opt/authyide/src/plugins/skills`（29 条目）均已存在；`/opt/authyide/src/agent` 为空（0 条目），引擎缺失与本机一致。宿主 `cargo`/`rustc`/`go`/`patchelf`/`rpm` 全部 MISSING，只有 `node`/`npm`——桌面构建目前只能在 workspace 机器上做，服务器侧只能出移动端 APK。
   - **本次 SSH 第 4 次重试才通**，与之前几次一致；上传与部署必须包在同一个重试单元（`run-remote.sh` 包住 `30-run.sh`），否则中途断开会留下半部署状态。
   - **服务器上的 payload 不会自动跟随本地源码更新，会静默回滚**：`/root/deploy-appbuilder/*.tgz` 是上次部署时的快照。改完本地后端源码后必须重新打包并上传，否则下次跑 `deploy.sh` 会用旧 payload 把后端回滚到没有修复的版本（本次就是旧包缺 `migration/000032` 与 `worker.NewWorker` 的 Provide，跑一次会回到 crash loop）。重打命令：`tar -czf backend-src.tgz backend`（根为 `backend/`）、`tar -czf mobile-src.tgz --exclude=node_modules --exclude=.expo --exclude=android --exclude=.gitignore --exclude=ota-server --exclude=package-lock.json -C mobile .`（根为 mobile 顶层，`android/` 由 runner 的 `expo prebuild` 生成，不能同步）、`tar -czf frontend-dist.tgz -C frontend dist`。上传前先在服务器 `cp *.tgz *.tgz.bak-<TS>` 留退路。
-  - **`deploy.sh` 第 8 步的凭据掩码原先锚在引号上，对 compose 的无引号标量永不匹配**，日志里会打出 `MCAI_CLICKHOUSE_PASSWORD`、`MCAI_REDIS_PASS`、`MCAI_DATABASE_MASTER` 的明文。已改为对整行值做掩码：`sed -E 's/^([[:space:]]*-[[:space:]]*[A-Za-z0-9_]+):.*/\1: <masked>/'`。改这类脱敏逻辑后要把本地 `.out` 日志一并扫一遍（`grep -rlE 'MCAI_(DATABASE_MASTER|CLICKHOUSE_PASSWORD|REDIS_PASS)'` + 同一条 sed）。
+   - **`deploy.sh` 第 8 步的凭据掩码原先锚在引号上，对 compose 的无引号标量永不匹配**，日志里会打出 `MCAI_CLICKHOUSE_PASSWORD`、`MCAI_REDIS_PASS`、`MCAI_DATABASE_MASTER` 的明文。已改为对整行值做掩码：`sed -E 's/^([[:space:]]*-[[:space:]]*[A-Za-z0-9_]+):.*/\1: <masked>/'`。改这类脱敏逻辑后要把本地 `.out` 日志一并扫一遍（`grep -rlE 'MCAI_(DATABASE_MASTER|CLICKHOUSE_PASSWORD|REDIS_PASS)'` + 同一条 sed）。
+   - **只改代码不改 compose 时走三阶段增量部署，不要跑完整 `deploy.sh`**：`/tmp/opencode/deploy-appbuilder/101-sync.sh`（tar 流式同步 backend/ + frontend/ 到 `/root/stage-appuser`，不落地本地 tarball，自带 6 次重试）、`102-run.sh` → `102-backend-build.sh`（备份旧 backend → 装新源码 → `Dockerfile.legacy` 重建镜像 → `authyide-up up -d --force-recreate backend` → 等 55s → 健康检查）、`103-run.sh` → `103-frontend-build.sh`（装 src/test/scripts → `pnpm exec tsc -b` → `VITE_APP_EDITION=offline pnpm exec vite build --mode offline`）。102/103 的 driver 各自先 hold 300s 冷却再连，避免限流。
+   - **同步正确性靠双向 sha256 逐行比对**：sync 脚本先打本地指纹，远程解压后再打一遍同清单的指纹，肉眼或 diff 逐行核对。服务器侧脚本还应在 `cp` 之后重打一遍，能抓出 stage 与安装目录不一致。
+   - **本地就能证明前端可构建，不必等服务器**：`npm run build`（`tsc -b && vite build --mode online`，约 2m）、`node --test test/i18n-resources-completeness.test.ts`（2 例，全绿）、`npx eslint <改动文件>`。本地后端全量核验：`GOTMPDIR=/dev/shm/go-tmp TMPDIR=/dev/shm/go-tmp go build -p=1 ./cmd/server ./biz/... ./domain/...` 加 `go test -p=1 ./biz/mobilebuild/...`。这些通过后服务器端 `tsc -b` 就不会失败，省一次 SSH 往返。
+   - **前端构建产物是否真的含新代码，用文案字符串反查**：`grep -l '新增的某句 i18n 英文原文' dist/assets/*.js`。命中 0 说明 dist 是旧的（nginx 可能还指着上一次的产物）。配合 `sha256sum dist/index.html` 与 `curl -s http://127.0.0.1/ | sha256sum` 比对，确认 nginx 伺服的就是刚构建的 `dist`。
+   - **App 图标功能不需要改 compose**：图标落在 `<MCAI_MOBILE_BUILD_ASSET_ROOT>/apps/<appID>.png`，`AppStore.Put` 自带 `MkdirAll`，目录由首次上传创建。部署前用 `docker exec authyide-backend sh -c "mkdir -p '<root>/apps' && test -w '<root>/apps' && echo writable"` 预检可写性即可，`root` 从 `MCAI_MOBILE_BUILD_ASSET_ROOT` 取。健康检查可顺带探 `GET /api/v1/users/apps/00000000-0000-0000-0000-000000000000/icon`，401/403 表示路由已注册、404 表示没进镜像。
 - [mobilebuild 运行时排障与验收]
 - Date: 2026-10-20
 - Context: Agent 部署 app-builder 后排查后端 crash loop、migration 与端到端验收可行性
@@ -372,9 +413,55 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - **安全造「配额已用满」的方法**：建一个 App 时传 `enabled_platforms:["ios"]`，再对它 POST android 构建。配额检查在平台门禁之前，所以返回 11404 就证明鉴权+归属+`canBuild` 全跑通了且没落任何 job 行。注意 `platformEnabled` 在 `len(enabled)==0` 时返回 true（空集=全部平台），**不能靠空数组挡住 android**。
   - **worker 只捞 `queued`**（`PickOldestQueued` 里 `StatusEQ(queued)`），所以给 `app_build_jobs` 插一行 `status='failed'` 的合成数据不会被执行，可用来触发每日上限（`CountJobsToday` 按 `user_id + enqueued_at 24h` 计数，不看状态、不看 app_id），验完用 `DELETE /api/v1/users/apps/builds/:jobID` 软删即可。
   - **本次收尾状态是干净的**：最后一次跑成的连接里 `trap restore` 已把 compose 还原（env 回到 BOTH-UNSET）、`active_jobs=0`、backend `Up`；最后一轮尝试在 SSH 握手阶段就被拒，没连上、没改任何东西。
-  - **SSH 限流是累积升级的，靠等长窗口也救不回来**：本轮 03:53 通 → 04:11、04:14 连拒 → 04:52 通（隔 38 分钟）→ 06:10 再拒（隔 78 分钟）→ **静默 149 分钟后 09:00 再拒**。连发 2-3 次失败后进入长 ban，之后无论等 78 分钟还是 149 分钟都还是 `kex_exchange_identification`。结论：**单次尝试失败就停手**，不要再用「多等一会儿」赌它自动解封；要么换网络出口，要么放弃本次线上验证，把方法留给之后手动跑。
+  - **SSH 限流是累积升级的，靠等长窗口也救不回来**：本轮 03:53 通 → 04:11、04:14 连拒 → 04:52 通（隔 38 分钟）→ 06:10 再拒（隔 78 分钟）→ **静默 149 分钟后 09:00 再拒**。2026-10-23 复现同样形态：14:53 阶段 1 单次连接通过（`tar | ssh` 算一次连接）→ 14:58 隔 **305s** 被拒 → 静默 **900s** 后 15:17 再拒。也就是说同一次部署里，305s 和 900s 两个间隔都不够解封；300s 冷却窗口只保证「不新增触发」，不保证「已经触发后解封」。连发 2-3 次失败后进入长 ban，之后无论等 78 分钟、149 分钟还是 15 分钟都还是 `kex_exchange_identification`。结论：**单次尝试失败就停手**，不要再用「多等一会儿」赌它自动解封；`marker-N` 标记 + 可续跑的 driver 是必须的（否则长静默后重跑会重复已完成的阶段）。要么换网络出口，要么放弃本次线上验证，把方法留给之后手动跑。
   - **重试驱动要带一次性标记，防止窗口被续跑时重复点火**：`background_terminal_create` 的 timeout 上限是 3600000ms（1 小时），2 小时以上的冷却必须拆成多个窗口接力。接力窗口共享同一个 `98-deadline` 文件，并用 `98-firing` / `98-fired` 两个标记保证全局只点火一次（谁先 touch `98-firing` 谁执行，另一个看到就退出）。窗口被 kill 在冷却中途是无害的，重启同一个脚本会从 deadline 继续睡。
 
 
 
 
+
+[本地资源约束与提交前核验：编译不可行时的止损与 git 状态防污染]
+- Date: 2026-10-21
+- Context: Agent 在磁盘 0 字节、可用内存 244MiB 的环境下尝试验证 Go 改动，并准备提交代码
+- Category: 排错调试|构建编译|环境配置
+- Instructions:
+  - **这个环境的内存是气球式的，可用内存无法回收**：`free -h` 显示 7.8GiB total / 7.5GiB used / 244~725MiB available（浮动），而 `ps --sort=-rss` 里最大的进程只有 opencode 本体约 637MiB。被气球吃掉的内存没有任何进程可 kill 来腾出，所以**靠"腾内存"是死路，要靠"降并行度"**。
+  - **默认并行编译会 OOM，加 `-p=1` 就能绕开**：`go build ./db`（ent 生成的 2MB 巨型包）用默认 `-p=N` 会被 OOM killer 杀掉，但 `go build -p=1 ./db` 14 秒完成。整个后端 `go build -p=1 ./cmd/server` 全部包编译 + 链接通过，产出 141MB 的 ELF（BuildID `ca7cd125…`），用时 272 秒。**之前"本环境编译不了"的结论是错的，只是默认并行度太高**。`-p=1` 慢，但慢得可接受。
+  - **产物和临时目录也要挪走，否则链接最后一步还是满盘失败**：`go build -o /tmp/...` 会报 `link: mapping output file failed: no space left on device`。产物写到 `/dev/shm` 仍报同样的错，因为 Go 链接器还会往 `GOTMPDIR`/`TMPDIR` 写临时映射文件，那两个默认落在满盘的 `/tmp`。正确姿势：`-o /dev/shm/xxx` + `GOTMPDIR=/dev/shm/go-tmp TMPDIR=/dev/shm/go-tmp`（先 `mkdir -p`）。GOCACHE 可以留在 `/go/cache`，缓存写失败 go 能容忍。
+  - **shell 陷阱**：`time (cmd)` 在默认 `sh` 下报 `Syntax error: "(" unexpected`，要用 `bash` 或干脆用 `S=$(date +%s); cmd; echo $(( $(date +%s) - S ))`。另外 `cmd | tail; echo $?` 拿到的是 `tail` 的退出码不是 `cmd` 的，要 `cmd > log 2>&1; E=$?` 才准。
+  - **编译不可行时用「符号级静态核验」代替编译**：逐个确认引用的符号真实存在且签名匹配。例如新增 `if db.IsConstraintError(err)` 前要确认 `func IsConstraintError(err error) bool`；新增 `consts.PlanTier(ent.Tier)` 前要确认 `db.Entitlement.Tier` 是 `string`（转 string-based 类型合法）；新增 `atomicWriteFile` 后要确认该文件已 import 用到的每个包（`os`、`path/filepath`）。`gofmt -l` 只能抓格式，抓不了未使用 import 之外的类型错。
+  - **提交前必须跑完整 `git status`，不能只看 `git add <file> && git status | head -3`**：本工作区的 git index 会被外部进程静默改写——同一轮里 `git add .gitignore` 之后 status 只显示 `.gitignore`，但下一条命令时 index 里已经多出 4 个前端文件的旧版本 blob（`git status --porcelain` 显示 `M `，即 index ≠ HEAD 且 worktree == index）。后果是 `git diff <file>`（不带 HEAD）显示的是 **index vs worktree**，看起来像「工作区有新增改动」，实际是 index 被换了旧内容。提交前用 `git status`（人类可读版，会列出全部 Untracked/Changes 分区）+ `git diff HEAD` 核对，`head` 截断会漏掉这类污染。
+  - **撤销外部污染的 index 用 `git restore --staged <files>`**，它只把 index 对齐 HEAD，不动工作区文件，比 `git reset` 精确，不会误伤真正想保留的改动。
+  - **部署用的前端代码与仓库提交可能不一致**：本仓库 `main` 提交（`6edcbdb`）里的 `apps.tsx` 是 `onChanged={load}`，而外部部署上下文里的同名文件是 `app={selected}`（无 `onChanged`）。`onChanged` 是可选 prop，所以两边都能编译，但缺它时「构建完成后刷新剩余次数」这条链路静默失效。合并部署分支时要单独核对这条。
+  - **`background_terminal_create` 的 memory_percent 在 cgroup 不支持时被忽略**：请求 memory_percent 时返回 `memory.max: none (not set)`，但 timeout 照常生效（`timeout: true`）。**要确保资源受限，必须同时传 memory_percent 和 timeout**——只传 memory_percent 时 cgroup 可能没限制，进程直接跑满把整机拖垮。
+
+[自服务打包改动的前后端校验路径与既有失败基线]
+- Date: 2026-10-23
+- Context: Agent 为移动端全平台自服务打包做收尾，需要跑通前后端校验
+- Category: 构建编译|测试方法|环境配置
+- Instructions:
+  - **新增 errcode 必须同时补两份语言文件**：只在 `backend/errcode/errcode.go` 里加 `web.NewErr(...)` 不够，`go test ./errcode/` 的 `TestErrCodeMessagesHaveLocaleEntries` 会逐条比对。要同时往 `backend/errcode/locale.zh.toml` 和 `locale.en.toml` 追加 `[key]` + `other = "..."`。两份文件当前有 1 个既有差异（`err-not-allow-individual` 只在 en 里），测试不校验，可不动。
+  - **前端没有 `npm test` 脚本，校验靠三条命令**：`npx tsc -b`（类型，全量约 1~2 分钟）、`npx eslint <改动的文件>`（只跑改动文件，几秒）、`node --test test/*-i18n.test.ts`（i18n 一致性，约 12 秒，144 个子测试）。`node --test` 直接跑 `.ts` 测试文件，靠 Node 的类型剥离，不需要装 vitest。
+  - **当前分支有 24 个 i18n 测试是预先失败的**，全部是欢迎页/登录页/设置弹窗/钱包/套餐/法律页/侧边栏品牌串断言，失败原因是资源文件已把品牌从 MonokeyCode 改成 AuthyIDE、tagline 也换了，而 `test/*-i18n.test.ts` 还断言旧串（如期望 `"MonkeyCode 智能任务"`、实际 `"AuthyIDE 智能任务"`）。判断是否自己引入的方法：`git diff frontend/src/i18n/resources/cn.ts` 里搜不到那个键，就是既有的，不用管。
+  - **校验新增页面引用的 i18n 键有没有漏配**：写个几十行的 node 脚本，`import cn` 后递归展开成点路径 Set，再正则扫 `i18n\.t\(\s*"([^"]+)"` 逐个比对。cn/en 两文件的键路径必须完全一致（当前各 3303 个）。
+  - **磁盘只有 20GB，go 构建缓存会吃满**：`/go/cache` 能涨到 4.2GB，`/tmp/go-build*` 约 1.2GB，写满后所有 go 测试报 `no space left on device` 而不是编译错——**看到 build failed 先 `df -h /` 确认空间**，再 `go clean -cache` 回收（约释放 4GB）。
+  - **后台终端里 `cmd | tail -N` 会吞掉真实退出码**，`background_terminal_list` 里的 exit code 是 `tail` 的 0，看着像全绿。要看真实结果就别加管道，改成 `cmd > log 2>&1; echo EXIT=$?`。
+  - **go-migrate 不会跑编号小于当前版本的 migration**：`max(version)` 记录了最高已执行版本，只往上调。2026-10-23 本地新增的 `000033_create_app_build_artifacts` 与 `000034_create_desktop_branding` 编号低于服务器已应用的 `000035`（这俩文件 mtime 10-23 06:15/06:21，10-21 那次部署时还不存在），照原编号上线会被**静默跳过**——后端不会报 migration 错误，而是 worker 轮询时 `pq: relation "app_build_artifacts" does not exist`。已改名 `000038`/`000039`，并同步改 `backend/migration/migration_test.go` 里 4 处 `os.ReadFile` 的文件名字符串（测试是逐字比对 SQL 内容，不感知版本号）。判定法：改完看 `migration/*.sql` 的编号是否严格大于服务器上 `select max(version) from schema_migrations` 的返回值，而不是看本地目录里是否单调。
+
+[宿主机绑定与云虚拟机的两个硬前置]
+- Date: 2026-10-23
+- Context: Agent 排查「服务器里创建云虚拟机装 Ubuntu 24 报错」，SSH 被封改用 HTTP 探针定位
+- Category: 故障排查|运维部署
+- Instructions:
+  - **「宿主机显示错误 / 建不了云虚拟机」的第一嫌疑是 Runner 安装程序 404**，不查库不登录也能确认：`curl -sI http://<server>/static/installer/x86_64/installer`，200 才正常。返回 404 时宿主机安装脚本在第一步 `curl` 就 `Failed to download installer` 退出（`backend/templates/install.sh.tmpl:75-78`），宿主机永远绑不上。URL 由后端拼（`installerURL()`，`backend/biz/host/usecase/host.go:227`），路径永远有效，缺的只是文件，所以要查的是文件不是配置。
+  - **Runner 安装程序的官方来源**：`https://release.baizhi.cloud/monkeycode/runner/<arch>/installer`（x86_64 为 13,582,865 字节，静态链接 ELF，sha256 `d86fc3937d71dff2af417d803ca94b83557a6ca559915427063a6bf1fe517c96`）。这个 URL 是 `backend/biz/host/usecase/host_test.go:84` 断言出来的，别去猜。要放到服务器上 nginx 实际服务 `/static` 的那个根目录（`/opt/authyide/data/static/installer/x86_64/`）并 `chmod 755`。
+  - **本仓库里没有任何 runner 源码，也没有这份制品**：全仓库 grep `runner` 命中的全是 `biz/mobilebuild/runner`（打包构建器，Go 包内代码），跟宿主机 Agent 是两回事。`Artifacts/authyide-deploy.tgz`（45MB）里只有源码和 APK，`tar tzf` 搜 `installer|runner` 无命中。所以这个二进制只能从 release CDN 取，本地无法构建。
+  - **`host.tgz` 与 `docker.tgz` 只有 offline 模式才需要**：`host_installer.mode` 默认 `online`（`backend/config/config.go:535`），online 只拉 `installer` 一个文件。CDN 上 `host.tgz`/`docker.tgz` 是 404，属于预期。
+  - **安装脚本的硬门槛**（`install.sh.tmpl:28-58`）：必须 root、必须 x86_64/aarch64、**x86_64 必须有 AVX**（`grep -qiE '(^|[[:space:]])avx([[:space:]]|$)' /proc/cpuinfo`，没有就报 `AuthyIDE Runner cannot be installed on this host`）。判断「宿主机显示错误」时这三条排在 CDN 404 之后查。
+  - **建云虚拟机必须先在后台配镜像**：`CreateVMReq.ImageID` 是 `validate:"required"`（`backend/domain/host.go:339`），`CreateVirtualMachine` 的入参直接带 `*db.Image`（`backend/domain/host.go:54`）。管理后台 → 镜像 → 添加镜像，填 docker 引用（占位符 `docker.io/library/ubuntu:24.04`，`frontend/src/components/manager/add-image.tsx:126`）再勾选授权分组。宿主机状态只有 `online`/`offline` 两个值（`backend/consts/host.go:29-30`），没有 error 态，所以「宿主机显示错误」实际是 VM 创建链路报错。
+  - **镜像拉取失败要配的是宿主机的 registry mirror**，不是平台服务器。VM 镜像由宿主机那台机器的 docker 拉，docker.io 不通就改宿主机的 `/etc/docker/daemon.json` 加 `registry-mirrors`。
+  - **Runner 在宿主机上只起 2 个容器**：`orchestrator`（`chaitin-registry.cn-hangzhou.cr.aliyuncs.com/monkeycode/codingmatrix-orchestrator:latest`，`ORCHESTRATOR_TYPE=docker`，VM 就是它起的 docker 容器）+ `watchtower`（自动更新 runner 自身，1800s 轮询）。compose 来自 `https://release.baizhi.cloud/monkeycode/runner/docker-compose.yml`（1756B），env 模板只有 4 个变量 `TOKEN`/`GRPC_HOST`/`GRPC_PORT`/`GRPC_URL`（`.../runner/env.template`，89B）。两个镜像都在阿里云 CR，不走 docker.io，所以 runner 自身部署不依赖能出 docker.io。
+  - **安装程序自己会装 Docker**：缺 docker 时走 `https://waf-ce.chaitin.cn/release/latest/get-docker.sh`（Chaitin 自己镜像的 get-docker.sh，21864B），docker-ce 包走 `https://mirrors.aliyun.com/docker-ce/` 回退，compose 配置走 `https://mirrors.tencent.com/docker-ce/docker-compose.yml`。所以宿主机不用预装 Docker，也不用为 runner 本身配 registry mirror。它会检查 `docker compose`（plugin 形态）且版本不能太低。
+  - **宿主机回连平台走 gRPC，配置在平台侧 `taskflow.*`**：`taskflow.grpc_host`/`grpc_port`/`grpc_url`（`backend/config/config.go:181-184`），`grpc_url` 默认空串（`config.go:481`）。**`grpc_url` 没配的话安装脚本渲染出来就是空，Agent 注册不上**——这是 Runner 404 修完之后第二顺位要查的。装 runner 的 compose 需要 `/var/run/docker.sock`，跟平台自己的 backend/frontend/db 容器共用同一 daemon，正常共存。
+  - **`https://baizhi.cloud/api/public/ipreflect` 当前返回 404**：安装程序用它探测宿主机公网 IP，这个端点挂了。宿主机的 `external_ip` 可能取不到正确值，排查「宿主机在线但显示异常」时查这条。
+  - 从外部实测 2026-10-23：`tcp://38.39.30.160:8000` 能建连但对 HTTP/1.1 请求不回任何字节（`curl` 得 `http_code=000`），符合 gRPC/HTTP2 行为，说明 gRPC 回连端口是开的、没被防火墙挡。runner 的三个上游（compose、env.template、get-docker.sh）从本机都能拉，`host.tgz`/`docker.tgz` 之外的依赖全部可达。

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Download, Loader2, RefreshCw, Rocket, RotateCcw, Smartphone, Trash2 } from "lucide-react"
+import { Download, Loader2, RefreshCw, Rocket, RotateCcw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { useTranslation } from "react-i18next"
 
-import { Api, type DomainApp, type DomainAppBuildJob } from "@/api/Api"
+import { Api, type DomainApp, type DomainAppBuildArtifactInfo, type DomainAppBuildJob } from "@/api/Api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,10 +17,40 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
+import { cn } from "@/lib/utils"
+import { PlatformIcon } from "./app-platform-icon"
+import { PLATFORM_LABEL_KEY, type AppPlatform } from "./app-platforms"
 
 const VERSION_RE = /^\d{6,8}$/
 const POLL_INTERVAL_MS = 5000
 const APK_NAME = "authyide.apk"
+
+// The app record stores the app vocabulary (web/android/ios/harmonyos/desktop);
+// the builder queue speaks android/desktop-linux. Only these two are buildable.
+const BUILD_PLATFORMS: AppPlatform[] = ["android", "desktop"]
+
+// The app vocabulary is what the UI shows and what app.enabled_platforms stores.
+function buildTarget(platform: AppPlatform): string {
+  return platform === "desktop" ? "desktop-linux" : "android"
+}
+
+function isDesktopTarget(platform: string): boolean {
+  return platform === "desktop-linux"
+}
+
+function platformLabelKey(platform: string): string {
+  return `consoleApps.platforms.${isDesktopTarget(platform) ? "desktop" : platform}`
+}
+
+function defaultPlatform(platforms: AppPlatform[]): AppPlatform {
+  return platforms.includes("android") ? "android" : "desktop"
+}
+
+function artifactFileName(job: DomainAppBuildJob, artifact?: DomainAppBuildArtifactInfo): string {
+  if (artifact?.file_name) return artifact.file_name
+  if (isDesktopTarget(job.platform)) return `${job.target_version}${artifact ? `.${artifact.channel}` : ".appimage"}`
+  return APK_NAME
+}
 
 type Envelope = {
   code?: number
@@ -79,8 +109,9 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
   const [loading, setLoading] = useState(true)
   const [version, setVersion] = useState("")
   const [versionCode, setVersionCode] = useState("")
+  const [buildPlatform, setBuildPlatform] = useState<AppPlatform>(defaultPlatform(BUILD_PLATFORMS))
   const [enqueueing, setEnqueueing] = useState(false)
-  const [busyJobId, setBusyJobId] = useState<string | null>(null)
+  const [busyKey, setBusyKey] = useState<string | null>(null)
   const [resetVersionCode, setResetVersionCode] = useState(false)
   const statusSeen = useRef<Map<string, string>>(new Map())
   // Kept in a ref so the polling callback stays stable across parent renders.
@@ -100,6 +131,8 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
       : "consoleApps.plans.free"
   )
   const platforms = app.enabled_platforms ?? []
+  const buildablePlatforms = BUILD_PLATFORMS.filter((platform) => platforms.includes(platform))
+  const isDesktopBuild = buildPlatform === "desktop"
   const maxVersionCode = jobs.reduce((max, job) => Math.max(max, job.version_code), 0)
 
   const loadJobs = useCallback(async () => {
@@ -135,6 +168,14 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
     void loadJobs()
   }, [loadJobs])
 
+  // The selected target must stay inside the app's enabled platforms, so an
+  // app that only ships a desktop build still has a buildable target.
+  useEffect(() => {
+    if (!buildablePlatforms.includes(buildPlatform)) {
+      setBuildPlatform(buildablePlatforms[0] ?? "android")
+    }
+  }, [buildablePlatforms, buildPlatform])
+
   const activeJob = jobs.find((job) => job.status === "queued" || job.status === "running")
 
   useEffect(() => {
@@ -151,9 +192,13 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
 
   const handleRetry = (job: DomainAppBuildJob) => {
     // Reuse the failed version and bump the code, since the server requires a
-    // version_code higher than anything already built.
+    // version_code higher than anything already built. Desktop jobs hide the
+    // field, so the server assigns the code.
     if (job.target_version) setVersion(job.target_version)
-    setVersionCode(String((job.version_code || 0) + 1))
+    setBuildPlatform(isDesktopTarget(job.platform) ? "desktop" : "android")
+    if (!isDesktopTarget(job.platform)) {
+      setVersionCode(String((job.version_code || 0) + 1))
+    }
     requestAnimationFrame(() => {
       document.getElementById("app-build-version")?.focus()
     })
@@ -162,6 +207,10 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
   const handleEnqueue = async () => {
     const id = app.id
     if (!id || enqueueing || activeJob) return
+    if (buildablePlatforms.length === 0) {
+      toast.error(t("consoleApps.builds.platformNotBuildable"))
+      return
+    }
     const versionText = version.trim()
     if (!VERSION_RE.test(versionText)) {
       toast.error(t("consoleApps.builds.versionInvalid"))
@@ -169,21 +218,21 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
     }
     const code = Number(versionCode)
     const autoCode = !versionCode
-    if (!autoCode && (!Number.isInteger(code) || code <= 0)) {
+    if (!isDesktopBuild && (!autoCode || !Number.isInteger(code) || code <= 0)) {
       toast.error(t("consoleApps.builds.versionCodeInvalid"))
       return
     }
     setEnqueueing(true)
     try {
       const resp = await api.api.v1UsersAppsBuildsCreate(id, {
-        platform: "android",
+        platform: buildTarget(buildPlatform),
         version: versionText,
-        version_code: autoCode ? 0 : code,
+        version_code: isDesktopBuild ? 0 : autoCode ? 0 : code,
       })
       if (resp.ok && resp.data?.code === 0) {
         const job = resp.data.data as DomainAppBuildJob | undefined
         toast.success(t("consoleApps.builds.enqueued"))
-        setVersionCode(String((job?.version_code ?? code) + 1))
+        if (!isDesktopBuild) setVersionCode(String((job?.version_code ?? code) + 1))
         void loadJobs()
       } else {
         toast.error(errorMessage(resp.data as Envelope, t("consoleApps.builds.enqueueFailed", { message: "" })))
@@ -195,11 +244,12 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
     }
   }
 
-  const handleDownload = async (job: DomainAppBuildJob) => {
+  const handleDownload = async (job: DomainAppBuildJob, artifact?: DomainAppBuildArtifactInfo) => {
     if (!job.id) return
-    setBusyJobId(job.id)
+    const channel = artifact?.channel
+    setBusyKey(`${job.id}:download:${channel ?? "default"}`)
     try {
-      const resp = await api.api.v1UsersAppsBuildsDownload(job.id)
+      const resp = await api.api.v1UsersAppsBuildsDownload(job.id, channel)
       if (!resp.ok) {
         toast.error(t("consoleApps.builds.downloadFailed"))
         return
@@ -208,7 +258,7 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement("a")
       anchor.href = url
-      anchor.download = APK_NAME
+      anchor.download = artifactFileName(job, artifact)
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
@@ -216,15 +266,15 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
     } catch (error) {
       toast.error(errorMessage(error, t("consoleApps.builds.downloadFailed")))
     } finally {
-      setBusyJobId(null)
+      setBusyKey(null)
     }
   }
 
-  const handlePublish = async (job: DomainAppBuildJob) => {
+  const handlePublish = async (job: DomainAppBuildJob, channel?: string) => {
     if (!job.id) return
-    setBusyJobId(job.id)
+    setBusyKey(`${job.id}:publish:${channel ?? "default"}`)
     try {
-      const resp = await api.api.v1UsersAppsBuildsPublish(job.id)
+      const resp = await api.api.v1UsersAppsBuildsPublish(job.id, channel)
       if (resp.ok && resp.data?.code === 0) {
         toast.success(t("consoleApps.builds.published"))
         void loadJobs()
@@ -234,13 +284,13 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
     } catch (error) {
       toast.error(errorMessage(error, t("consoleApps.builds.publishFailed", { message: "" })))
     } finally {
-      setBusyJobId(null)
+      setBusyKey(null)
     }
   }
 
   const handleDelete = async (job: DomainAppBuildJob) => {
     if (!job.id) return
-    setBusyJobId(job.id)
+    setBusyKey(`${job.id}:delete`)
     try {
       const resp = await api.api.v1UsersAppsBuildsDelete(job.id)
       if (resp.ok && resp.data?.code === 0) {
@@ -252,7 +302,7 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
     } catch (error) {
       toast.error(errorMessage(error, t("consoleApps.builds.deleteFailed", { message: "" })))
     } finally {
-      setBusyJobId(null)
+      setBusyKey(null)
     }
   }
 
@@ -261,7 +311,7 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
       <Card className="w-full shadow-none">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Smartphone />
+            <PlatformIcon platform={buildPlatform} className="size-4" />
             {t("consoleApps.builds.title")}
           </CardTitle>
           <CardDescription>
@@ -327,7 +377,36 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
             </div>
           ) : null}
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="flex flex-col gap-2">
+              <Label>{t("consoleApps.builds.targetPlatform")}</Label>
+              <div className="flex flex-wrap items-center gap-1">
+                {buildablePlatforms.map((platform) => (
+                  <button
+                    key={platform}
+                    type="button"
+                    role="radio"
+                    aria-checked={buildPlatform === platform}
+                    disabled={locked || !!activeJob || enqueueing}
+                    onClick={() => setBuildPlatform(platform)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                      buildPlatform === platform
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-input text-muted-foreground hover:bg-muted"
+                    )}
+                  >
+                    <PlatformIcon platform={platform} className="size-4" />
+                    {t(PLATFORM_LABEL_KEY[platform])}
+                  </button>
+                ))}
+              </div>
+              {buildablePlatforms.length === 0 ? (
+                <span className="text-xs text-muted-foreground">
+                  {t("consoleApps.builds.platformNotBuildable")}
+                </span>
+              ) : null}
+            </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="app-build-version">{t("consoleApps.builds.version")}</Label>
               <Input
@@ -338,25 +417,27 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
                 onChange={(event) => setVersion(event.target.value)}
               />
             </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="app-build-version-code">
-                {t("consoleApps.builds.versionCode")}
-              </Label>
-              <Input
-                id="app-build-version-code"
-                type="number"
-                min={1}
-                value={versionCode}
-                placeholder={String(maxVersionCode + 1)}
-                disabled={locked || !!activeJob || enqueueing}
-                onChange={(event) => setVersionCode(event.target.value)}
-              />
-            </div>
+            {isDesktopBuild ? null : (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="app-build-version-code">
+                  {t("consoleApps.builds.versionCode")}
+                </Label>
+                <Input
+                  id="app-build-version-code"
+                  type="number"
+                  min={1}
+                  value={versionCode}
+                  placeholder={String(maxVersionCode + 1)}
+                  disabled={locked || !!activeJob || enqueueing}
+                  onChange={(event) => setVersionCode(event.target.value)}
+                />
+              </div>
+            )}
             <div className="flex items-end">
               <Button
                 onClick={() => void handleEnqueue()}
-                disabled={locked || enqueueing || !!activeJob}
-                className="w-full"
+                disabled={locked || enqueueing || !!activeJob || buildablePlatforms.length === 0}
+                className={cn("w-full", isDesktopBuild && "lg:col-span-2")}
               >
                 {enqueueing ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -393,22 +474,36 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
           ) : (
             <div className="flex flex-col gap-2">
               {jobs.map((job) => {
-                const busy = busyJobId === job.id
+                const isDesktopJob = isDesktopTarget(job.platform)
+                const busy = busyKey === `${job.id}:delete`
                 const isActive = job.status === "queued" || job.status === "running"
+                const busyIn = (action: string, channel?: string) =>
+                  busyKey === `${job.id}:${action}:${channel ?? "default"}`
+                const artifacts: DomainAppBuildArtifactInfo[] =
+                  job.status === "succeeded" ? job.artifacts ?? [] : []
+                const packages = artifacts.length > 0
+                  ? artifacts
+                  : [{ channel: isDesktopJob ? "appimage" : "apk" }]
                 return (
                   <div key={job.id} className="rounded-lg border">
                     <div className="flex flex-wrap items-center gap-3 p-3">
                       <div className="flex flex-col gap-0.5">
-                        <span className="text-sm font-medium">
+                        <span className="flex items-center gap-1.5 text-sm font-medium">
+                          <PlatformIcon platform={job.platform} className="size-3.5" />
                           {job.target_version}
-                          <span className="ml-2 text-xs font-normal text-muted-foreground">
-                            #{job.version_code}
-                          </span>
+                          {isDesktopJob ? null : (
+                            <span className="text-xs font-normal text-muted-foreground">
+                              #{job.version_code}
+                            </span>
+                          )}
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {formatTime(job.enqueued_at)}
                         </span>
                       </div>
+                      <Badge variant="outline" className="capitalize">
+                        {t(platformLabelKey(job.platform), job.platform)}
+                      </Badge>
                       <Badge
                         variant={
                           job.status === "succeeded"
@@ -430,15 +525,26 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
                               ? formatDuration(job.duration_ms)
                               : ""}
                       </span>
-                       {job.status === "succeeded" && job.artifact_sha256 ? (
-                         <span
-                           className="text-xs text-muted-foreground"
-                           title={`${t("consoleApps.builds.sha256")}: ${job.artifact_sha256}`}
-                         >
-                           {t("consoleApps.builds.sha256")}:{" "}
-                           <span className="font-mono">{job.artifact_sha256.slice(0, 12)}…</span>
-                         </span>
-                       ) : null}
+                        {job.status === "succeeded" && job.artifact_sha256 ? (
+                          <span
+                            className="text-xs text-muted-foreground"
+                            title={`${t("consoleApps.builds.sha256")}: ${job.artifact_sha256}`}
+                          >
+                            {t("consoleApps.builds.sha256")}:{" "
+                            }<span className="font-mono">{job.artifact_sha256.slice(0, 12)}…</span>
+                          </span>
+                        ) : null}
+                        {job.source_snapshot_id ? (
+                          <span
+                            className="text-xs text-muted-foreground"
+                            title={job.source_task_title ?? job.source_snapshot_id}
+                          >
+                            {t("consoleApps.builds.source")}:{" "
+                            }<span className="truncate">
+                              {job.source_task_title || job.source_snapshot_id.slice(0, 8)}
+                            </span>
+                          </span>
+                        ) : null}
                         {job.status === "failed" ? (
                           <div className="min-w-0 flex-1 space-y-1">
                             {job.error ? (
@@ -472,34 +578,51 @@ export function AppBuildsPanel({ app, onChanged }: AppBuildsPanelProps) {
                           <Button
                             variant="outline"
                             size="sm"
-                            disabled={busy}
+                            disabled={enqueueing}
                             onClick={() => handleRetry(job)}
                           >
                             <RotateCcw className="size-3.5" />
                             {t("consoleApps.builds.retry")}
                           </Button>
                         ) : null}
-                        {job.status === "succeeded" ? (
-                          <Button
-                            size="sm"
-                            disabled={busy}
-                            onClick={() => void handlePublish(job)}
-                          >
-                            {busy ? <Spinner className="size-3.5" /> : <Rocket className="size-3.5" />}
-                            {t("consoleApps.builds.publish")}
-                          </Button>
-                        ) : null}
-                        {job.status === "succeeded" ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() => void handleDownload(job)}
-                          >
-                            {busy ? <Spinner className="size-3.5" /> : <Download className="size-3.5" />}
-                            {t("consoleApps.builds.download")}
-                          </Button>
-                        ) : null}
+                        {job.status === "succeeded" && !locked
+                          ? packages
+                              .filter((artifact) => artifact.publishable)
+                              .map((artifact) => (
+                                <Button
+                                  key={`publish-${artifact.channel}`}
+                                  size="sm"
+                                  disabled={busyIn("publish", artifact.channel)}
+                                  onClick={() => void handlePublish(job, artifact.channel)}
+                                >
+                                  {busyIn("publish", artifact.channel) ? (
+                                    <Spinner className="size-3.5" />
+                                  ) : (
+                                    <Rocket className="size-3.5" />
+                                  )}
+                                  {t("consoleApps.builds.publish")}
+                                  {packages.length > 1 ? ` · ${artifact.channel}` : null}
+                                </Button>
+                              ))
+                          : null}
+                        {job.status === "succeeded"
+                          ? packages.map((artifact) => (
+                            <Button
+                              key={`download-${artifact.channel}`}
+                              variant="outline"
+                              size="sm"
+                              disabled={busyIn("download", artifact.channel)}
+                              onClick={() => void handleDownload(job, artifact)}
+                            >
+                              {busyIn("download", artifact.channel) ? (
+                                <Spinner className="size-3.5" />
+                              ) : (
+                                <Download className="size-3.5" />
+                              )}
+                              {packages.length > 1 ? artifact.channel : t("consoleApps.builds.download")}
+                            </Button>
+                          ))
+                          : null}
                         <Button
                           variant="ghost"
                           size="sm"

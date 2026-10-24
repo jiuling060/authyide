@@ -265,6 +265,20 @@ type MobileBuildConfig struct {
 	QueueDepth int `mapstructure:"queue_depth"`
 	// DailyBuildLimit caps pro-tier jobs per app per 24h. 0 means unlimited.
 	DailyBuildLimit int `mapstructure:"daily_build_limit"`
+
+	// DesktopEnabled gates the desktop-linux platform. The worker refuses to
+	// claim jobs of a disabled platform, so a broken toolchain cannot wedge the
+	// single build slot.
+	DesktopEnabled     bool   `mapstructure:"desktop_enabled"`
+	DesktopWorkspace   string `mapstructure:"desktop_workspace"`
+	EngineSrc          string `mapstructure:"engine_src"`
+	ExtensionDir       string `mapstructure:"extension_dir"`
+	SkillsDir          string `mapstructure:"skills_dir"`
+	BuildTimeout       string `mapstructure:"build_timeout"`
+	CargoTimeout       string `mapstructure:"cargo_timeout"`
+	MinFreeDiskBytes   int64  `mapstructure:"min_free_disk_bytes"`
+	MinFreeMemBytes    int64  `mapstructure:"min_free_mem_bytes"`
+	UpdaterSigningKeyPath string `mapstructure:"updater_signing_key_path"`
 }
 
 func (c MobileBuildConfig) GradleTimeoutDuration() time.Duration {
@@ -277,6 +291,43 @@ func (c MobileBuildConfig) PollIntervalDuration() time.Duration {
 
 func (c MobileBuildConfig) LogTailRefreshDuration() time.Duration {
 	return parseMobileBuildDuration(c.LogTailRefresh, 5*time.Second)
+}
+
+// BuildTimeoutDuration is the per-step timeout of the short desktop steps
+// (ui-next, engine, browser-extension). GradleTimeout stays android-only so the
+// proven mobile timeout is never shortened by the desktop defaults.
+func (c MobileBuildConfig) BuildTimeoutDuration() time.Duration {
+	return parseMobileBuildDuration(c.BuildTimeout, 20*time.Minute)
+}
+
+// CargoTimeoutDuration bounds cargo build and tauri build, which recompile the
+// shell and take about half an hour on a cold target/.
+func (c MobileBuildConfig) CargoTimeoutDuration() time.Duration {
+	return parseMobileBuildDuration(c.CargoTimeout, 60*time.Minute)
+}
+
+// PlatformEnabled reports whether platform may claim a build slot. Only
+// desktop-linux is gated; android is on whenever the module is enabled, so a
+// missing desktop toolchain cannot wedge the mobile pipeline.
+func (c MobileBuildConfig) PlatformEnabled(platform string) bool {
+	if platform == "desktop-linux" {
+		return c.DesktopEnabled
+	}
+	return true
+}
+
+func (c MobileBuildConfig) MinFreeDisk() int64 {
+	if c.MinFreeDiskBytes <= 0 {
+		return int64(4) << 30
+	}
+	return c.MinFreeDiskBytes
+}
+
+func (c MobileBuildConfig) MinFreeMem() int64 {
+	if c.MinFreeMemBytes <= 0 {
+		return int64(3) << 30
+	}
+	return c.MinFreeMemBytes
 }
 
 func parseMobileBuildDuration(s string, fallback time.Duration) time.Duration {
@@ -471,6 +522,16 @@ func Init(dir string) (*Config, error) {
 	v.SetDefault("mobile_build.updates_url", "")
 	v.SetDefault("mobile_build.queue_depth", 20)
 	v.SetDefault("mobile_build.daily_build_limit", 0)
+	v.SetDefault("mobile_build.desktop_enabled", false)
+	v.SetDefault("mobile_build.desktop_workspace", "/opt/authyide/src/desktop")
+	v.SetDefault("mobile_build.engine_src", "/opt/authyide/src/agent")
+	v.SetDefault("mobile_build.extension_dir", "/opt/authyide/src/browser-extension")
+	v.SetDefault("mobile_build.skills_dir", "/opt/authyide/src/plugins/skills")
+	v.SetDefault("mobile_build.build_timeout", "20m")
+	v.SetDefault("mobile_build.cargo_timeout", "60m")
+	v.SetDefault("mobile_build.min_free_disk_bytes", int64(4)<<30)
+	v.SetDefault("mobile_build.min_free_mem_bytes", int64(3)<<30)
+	v.SetDefault("mobile_build.updater_signing_key_path", "")
 	v.SetDefault("host_installer.mode", "online")
 	v.SetDefault("host_installer.bundle_path", "installer/{{.arch}}/host.tgz")
 	v.SetDefault("llm_proxy.base_url", "")

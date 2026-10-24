@@ -153,6 +153,18 @@ func (f AppBrandingFunc) Mutate(ctx context.Context, m db.Mutation) (db.Value, e
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *db.AppBrandingMutation", m)
 }
 
+// The AppBuildArtifactFunc type is an adapter to allow the use of ordinary
+// function as AppBuildArtifact mutator.
+type AppBuildArtifactFunc func(context.Context, *db.AppBuildArtifactMutation) (db.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AppBuildArtifactFunc) Mutate(ctx context.Context, m db.Mutation) (db.Value, error) {
+	if mv, ok := m.(*db.AppBuildArtifactMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *db.AppBuildArtifactMutation", m)
+}
+
 // The AppBuildJobFunc type is an adapter to allow the use of ordinary
 // function as AppBuildJob mutator.
 type AppBuildJobFunc func(context.Context, *db.AppBuildJobMutation) (db.Value, error)
@@ -165,6 +177,30 @@ func (f AppBuildJobFunc) Mutate(ctx context.Context, m db.Mutation) (db.Value, e
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *db.AppBuildJobMutation", m)
 }
 
+// The AppDesktopBrandingFunc type is an adapter to allow the use of ordinary
+// function as AppDesktopBranding mutator.
+type AppDesktopBrandingFunc func(context.Context, *db.AppDesktopBrandingMutation) (db.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AppDesktopBrandingFunc) Mutate(ctx context.Context, m db.Mutation) (db.Value, error) {
+	if mv, ok := m.(*db.AppDesktopBrandingMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *db.AppDesktopBrandingMutation", m)
+}
+
+// The AppSourceSnapshotFunc type is an adapter to allow the use of ordinary
+// function as AppSourceSnapshot mutator.
+type AppSourceSnapshotFunc func(context.Context, *db.AppSourceSnapshotMutation) (db.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AppSourceSnapshotFunc) Mutate(ctx context.Context, m db.Mutation) (db.Value, error) {
+	if mv, ok := m.(*db.AppSourceSnapshotMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *db.AppSourceSnapshotMutation", m)
+}
+
 // The AuditFunc type is an adapter to allow the use of ordinary
 // function as Audit mutator.
 type AuditFunc func(context.Context, *db.AuditMutation) (db.Value, error)
@@ -175,6 +211,18 @@ func (f AuditFunc) Mutate(ctx context.Context, m db.Mutation) (db.Value, error) 
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *db.AuditMutation", m)
+}
+
+// The DesktopBrandingFunc type is an adapter to allow the use of ordinary
+// function as DesktopBranding mutator.
+type DesktopBrandingFunc func(context.Context, *db.DesktopBrandingMutation) (db.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f DesktopBrandingFunc) Mutate(ctx context.Context, m db.Mutation) (db.Value, error) {
+	if mv, ok := m.(*db.DesktopBrandingMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *db.DesktopBrandingMutation", m)
 }
 
 // The EntitlementFunc type is an adapter to allow the use of ordinary

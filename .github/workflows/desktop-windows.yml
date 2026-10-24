@@ -17,6 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read productName from tauri config
+        run: |
+          PRODUCT_NAME=$(python -c 'import json; print(json.load(open("desktop/tauri.conf.json"))["productName"])')
+          echo "PRODUCT_NAME=$PRODUCT_NAME" >> "$GITHUB_ENV"
+
       - uses: actions/setup-go@v5
         with:
           go-version: stable
@@ -97,12 +102,12 @@ jobs:
             npx --yes @tauri-apps/cli@^2 build --config bundle.windows.conf.json
           fi
           RELEASE_VERSION="${GITHUB_REF_NAME#v}"
-          EXPECTED="target/release/bundle/nsis/AuthyIDE_${RELEASE_VERSION}.0.0_x64-setup.exe"
+          EXPECTED="target/release/bundle/nsis/${PRODUCT_NAME}_${RELEASE_VERSION}.0.0_x64-setup.exe"
           test -f "$EXPECTED" || { echo "::error::安装包版本未与 tag 对齐，缺少 $EXPECTED"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AuthyIDE-windows-x64-${{ github.ref_name }}
+          name: ${{ env.PRODUCT_NAME }}-windows-x64-${{ github.ref_name }}
           path: |
             desktop/target/release/bundle/nsis/*.exe
             desktop/target/release/bundle/updater/*

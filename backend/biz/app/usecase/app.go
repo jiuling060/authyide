@@ -30,6 +30,8 @@ type appUsecase struct {
 	logger        *slog.Logger
 	networks      []domain.AdNetworkOption
 	validNetworks map[string]bool
+	// snapshots 校验绑定的会话源码快照归属、就绪状态与过期状态。
+	snapshots domain.SnapshotService
 }
 
 func NewAppUsecase(i *do.Injector) (domain.AppQuotaService, error) {
@@ -42,6 +44,7 @@ func NewAppUsecase(i *do.Injector) (domain.AppQuotaService, error) {
 		logger:        logger,
 		networks:      networks,
 		validNetworks: adNetworkSet(networks),
+		snapshots:     do.MustInvoke[domain.SnapshotService](i),
 	}, nil
 }
 
@@ -93,6 +96,9 @@ func (u *appUsecase) Create(ctx context.Context, uid uuid.UUID, req *domain.Crea
 	if len(req.EnabledPlatforms) == 0 {
 		req.EnabledPlatforms = []string{"web"}
 	}
+	if err := u.validateSnapshotBinding(ctx, uid, req.SourceSnapshotID); err != nil {
+		return nil, err
+	}
 	req.AdNetwork = adNetwork
 	if adNetwork == "none" {
 		req.AdAppID = ""
@@ -125,6 +131,9 @@ func (u *appUsecase) Update(ctx context.Context, uid, id uuid.UUID, req *domain.
 	// Locked apps are frozen: no field of them can be edited in the user center.
 	if current.Locked {
 		return nil, errcode.ErrAppLocked
+	}
+	if err := u.validateSnapshotBinding(ctx, uid, updateSnapshotID(req.SourceSnapshotID)); err != nil {
+		return nil, err
 	}
 
 	adNetwork := current.AdNetwork
@@ -166,6 +175,36 @@ func (u *appUsecase) Update(ctx context.Context, uid, id uuid.UUID, req *domain.
 	return u.toApp(row, ent.Tier), nil
 }
 
+// SetSource 单独换绑会话源码快照。req 为 nil 或 SourceSnapshotID 为 nil 都表示
+// 解绑回模板源码。
+func (u *appUsecase) SetSource(ctx context.Context, uid, id uuid.UUID, req *domain.SetSourceAppReq) (*domain.App, error) {
+	current, err := u.repo.Get(ctx, uid, id)
+	if err != nil {
+		return nil, errcode.ErrAppNotFound
+	}
+	if current.Locked {
+		return nil, errcode.ErrAppLocked
+	}
+
+	var target *uuid.UUID
+	if req != nil {
+		target = req.SourceSnapshotID
+	}
+	if err := u.validateSnapshotBinding(ctx, uid, target); err != nil {
+		return nil, err
+	}
+
+	row, err := u.repo.Update(ctx, uid, id, &domain.UpdateAppReq{ID: id, SourceSnapshotID: &target})
+	if err != nil {
+		return nil, errcode.ErrDatabaseOperation.Wrap(err)
+	}
+	ent, err := u.repo.EnsureEntitlement(ctx, uid)
+	if err != nil {
+		return nil, errcode.ErrDatabaseQuery.Wrap(err)
+	}
+	return u.toApp(row, ent.Tier), nil
+}
+
 func (u *appUsecase) Delete(ctx context.Context, uid, id uuid.UUID) error {
 	if _, err := u.repo.Get(ctx, uid, id); err != nil {
 		return errcode.ErrAppNotFound
@@ -191,12 +230,23 @@ func (u *appUsecase) EnqueueBuild(ctx context.Context, uid, appID uuid.UUID, req
 	if err := u.canBuild(ctx, uid, app); err != nil {
 		return nil, err
 	}
+	snap, err := u.sourceSnapshotForBuild(ctx, uid, app)
+	if err != nil {
+		return nil, err
+	}
+	var snapID, taskID *uuid.UUID
+	if snap != nil {
+		snapID = &snap.ID
+		taskID = &snap.TaskID
+	}
 	return u.builds.Enqueue(ctx, domain.AppBuildInput{
-		AppID:       appID,
-		Owner:       uid,
-		Platform:    req.Platform,
-		Version:     req.Version,
-		VersionCode: req.VersionCode,
+		AppID:            appID,
+		Owner:            uid,
+		Platform:         req.Platform,
+		Version:          req.Version,
+		VersionCode:      req.VersionCode,
+		SourceSnapshotID: snapID,
+		SourceTaskID:     taskID,
 	})
 }
 
@@ -211,16 +261,81 @@ func (u *appUsecase) GetBuild(ctx context.Context, uid, id uuid.UUID) (*domain.A
 	return u.builds.Get(ctx, uid, id)
 }
 
-func (u *appUsecase) DownloadBuild(ctx context.Context, uid, id uuid.UUID) (domain.AppBuildArtifact, error) {
-	return u.builds.Download(ctx, uid, id)
+func (u *appUsecase) DownloadBuild(ctx context.Context, uid, id uuid.UUID, channel string) (domain.AppBuildArtifact, error) {
+	return u.builds.Download(ctx, uid, id, channel)
 }
 
-func (u *appUsecase) PublishBuild(ctx context.Context, uid, id uuid.UUID) (*domain.AppBuildRelease, error) {
-	return u.builds.Publish(ctx, uid, id)
+func (u *appUsecase) PublishBuild(ctx context.Context, uid, id uuid.UUID, channel string) (*domain.AppBuildRelease, error) {
+	return u.builds.Publish(ctx, uid, id, channel)
+}
+
+// ListAppBuilds is the admin view of one app's history: it skips the owner
+// check, because an admin reads every tenant's builds.
+func (u *appUsecase) ListAppBuilds(ctx context.Context, appID uuid.UUID) ([]*domain.AppBuildRecord, error) {
+	app, err := u.repo.GetByID(ctx, appID)
+	if err != nil {
+		return nil, errcode.ErrAppNotFound
+	}
+	jobs, err := u.builds.ListAll(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*domain.AppBuildRecord, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, &domain.AppBuildRecord{
+			Job:       j,
+			AppName:   app.Name,
+			PackageID: app.PackageID,
+			OwnerID:   app.UserID,
+		})
+	}
+	return out, nil
 }
 
 func (u *appUsecase) DeleteBuild(ctx context.Context, uid, id uuid.UUID) error {
 	return u.builds.Delete(ctx, uid, id)
+}
+
+func (u *appUsecase) UploadIcon(ctx context.Context, uid, appID uuid.UUID, data []byte) error {
+	if _, err := u.repo.Get(ctx, uid, appID); err != nil {
+		return errcode.ErrAppNotFound
+	}
+	return u.builds.UploadIcon(ctx, uid, appID, data)
+}
+
+func (u *appUsecase) ClearIcon(ctx context.Context, uid, appID uuid.UUID) error {
+	if _, err := u.repo.Get(ctx, uid, appID); err != nil {
+		return errcode.ErrAppNotFound
+	}
+	return u.builds.ClearIcon(ctx, uid, appID)
+}
+
+func (u *appUsecase) DownloadIcon(ctx context.Context, uid, appID uuid.UUID) (domain.AppBuildArtifact, error) {
+	if _, err := u.repo.Get(ctx, uid, appID); err != nil {
+		return domain.AppBuildArtifact{}, errcode.ErrAppNotFound
+	}
+	return u.builds.DownloadIcon(ctx, uid, appID)
+}
+
+func (u *appUsecase) Platforms(ctx context.Context, uid, appID uuid.UUID, desktopLicensed bool) ([]domain.AppBuildPlatform, error) {
+	if _, err := u.repo.Get(ctx, uid, appID); err != nil {
+		return nil, errcode.ErrAppNotFound
+	}
+	return u.builds.Platforms(ctx, uid, appID, desktopLicensed)
+}
+
+func (u *appUsecase) GetDesktopBranding(ctx context.Context, uid, appID uuid.UUID) (*domain.AppDesktopBranding, error) {
+	if _, err := u.repo.Get(ctx, uid, appID); err != nil {
+		return nil, errcode.ErrAppNotFound
+	}
+	return u.builds.GetDesktopBranding(ctx, uid, appID)
+}
+
+func (u *appUsecase) SaveDesktopBranding(ctx context.Context, uid, appID uuid.UUID, req *domain.AppUpdateDesktopBrandingReq) (*domain.AppDesktopBranding, error) {
+	if _, err := u.repo.Get(ctx, uid, appID); err != nil {
+		return nil, errcode.ErrAppNotFound
+	}
+	return u.builds.SaveDesktopBranding(ctx, uid, appID, req)
 }
 
 // canBuild is the packaging quota check. The free tier gets one successful
@@ -258,6 +373,44 @@ func (u *appUsecase) validatePlatforms(platforms []string) error {
 		}
 	}
 	return nil
+}
+
+// validateSnapshotBinding 校验绑定的会话源码快照属于该用户、已就绪且未过期。
+// id 为 nil 表示不绑定快照、沿用模板源码，直接放行。
+func (u *appUsecase) validateSnapshotBinding(ctx context.Context, uid uuid.UUID, id *uuid.UUID) error {
+	if id == nil {
+		return nil
+	}
+	_, err := u.sourceSnapshotForBuild(ctx, uid, &db.App{SourceSnapshotID: id})
+	return err
+}
+
+// sourceSnapshotForBuild 重查 App 的快照绑定：绑定值可能在上次编辑后过期或被
+// 同会话更新取代。返回 nil 表示这次任务用模板源码。
+func (u *appUsecase) sourceSnapshotForBuild(ctx context.Context, uid uuid.UUID, app *db.App) (*domain.Snapshot, error) {
+	if app == nil || app.SourceSnapshotID == nil {
+		return nil, nil
+	}
+	snap, err := u.snapshots.Get(ctx, uid, *app.SourceSnapshotID)
+	if err != nil || snap == nil {
+		return nil, errcode.ErrAppSourceSnapshotUnbound
+	}
+	if snap.Superseded {
+		return nil, errcode.ErrAppSourceSnapshotUnbound
+	}
+	if snap.Stale {
+		return nil, errcode.ErrSnapshotStale
+	}
+	return snap, nil
+}
+
+// updateSnapshotID 把三级指针摊平：外层 nil 表示请求未提及该字段，内层 nil 表示
+// 显式解绑回模板源码。
+func updateSnapshotID(v **uuid.UUID) *uuid.UUID {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func (u *appUsecase) toApp(row *db.App, tier string) *domain.App {

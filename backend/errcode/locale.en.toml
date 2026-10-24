@@ -357,3 +357,76 @@ other = "OTA updates are not enabled for this deployment"
 
 [err-workspace-invalid]
 other = "The mobile build workspace is not usable"
+
+
+# Desktop and full-platform mobile packaging
+[err-platform-disabled]
+other = "Packaging for this platform is not enabled for this deployment"
+
+[err-platform-invalid]
+other = "Unsupported packaging platform"
+
+[err-channel-invalid]
+other = "Unsupported release channel"
+
+[err-channel-not-publishable]
+other = "This release channel cannot be published"
+
+[err-resource-insufficient]
+other = "Insufficient build resources, please retry later"
+
+[err-build-queue-full]
+other = "The build queue is full, please retry later"
+
+[err-build-failed]
+other = "The build failed, check the build log for details"
+
+# Session source snapshot
+[err-snapshot-empty]
+other = "The session has no source code to package"
+
+[err-snapshot-sync-failed]
+other = "Failed to sync the session source code"
+
+[err-snapshot-too-large]
+other = "The session source code exceeds the packaging size limit"
+
+[err-snapshot-not-found]
+other = "Session source snapshot not found"
+
+[err-snapshot-stale]
+other = "The session source snapshot is stale"
+
+[err-snapshot-corrupt]
+other = "The session source snapshot is corrupt"
+
+[err-app-source-snapshot-unbound]
+other = "The app is not bound to a session source snapshot"
+
+[err-app-build-quota-exceeded]
+other = "The app build quota is exceeded"
+
+[err-app-package-id-conflict]
+other = "The app package id is already taken"
+
+[err-build-daily-quota-exceeded]
+other = "The daily build quota is exceeded"
+
+# Email registration
+[err-register-email-invalid]
+other = "Invalid email address"
+
+[err-register-password-invalid]
+other = "The password does not meet the requirements"
+
+[err-register-email-taken]
+other = "The email address is already registered"
+
+[err-register-token-invalid]
+other = "The email verification has expired, request a new one"
+
+[err-register-email-unverified]
+other = "The email address is not verified"
+
+[err-register-already-verified]
+other = "The email address is already verified"

@@ -42,6 +42,11 @@ func (AppBuildJob) Fields() []ent.Field {
 		// app_id is nullable: admin-console builds are instance-wide and
 		// reference no user-center app. Self-service packaging sets it.
 		field.UUID("app_id", uuid.UUID{}).Optional().Nillable(),
+		// source_snapshot_id and source_task_id are written once at enqueue time
+		// and never updated. Nil means the job built from the instance template.
+		// They are provenance only: no query path reads them.
+		field.UUID("source_snapshot_id", uuid.UUID{}).Optional().Nillable(),
+		field.UUID("source_task_id", uuid.UUID{}).Optional().Nillable(),
 		field.String("platform").NotEmpty(),
 		// target_version is the expo version string baked into app.json.
 		field.String("target_version").NotEmpty(),

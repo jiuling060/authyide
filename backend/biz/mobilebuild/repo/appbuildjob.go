@@ -36,6 +36,27 @@ func (r *appBuilderRepo) ListByApp(ctx context.Context, userID, appID uuid.UUID,
 	return out, nil
 }
 
+// ListByAppAll returns every job of one app, newest first. It does not filter
+// the owner, so an admin must call it behind admin auth.
+func (r *appBuilderRepo) ListByAppAll(ctx context.Context, appID uuid.UUID, limit int) ([]*domain.BuildJob, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := r.db.AppBuildJob.Query().
+		Where(appbuildjob.AppIDEQ(appID)).
+		Order(db.Desc(appbuildjob.FieldEnqueuedAt)).
+		Limit(limit).
+		All(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list app build jobs: %w", err)
+	}
+	out := make([]*domain.BuildJob, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, jobFromRow(row))
+	}
+	return out, nil
+}
+
 // GetAppBranding returns the per-app build inputs of one user-center app,
 // nil when the app is absent or deleted.
 func (r *appBuilderRepo) GetAppBranding(ctx context.Context, appID uuid.UUID) (*domain.AppBranding, error) {
@@ -48,8 +69,10 @@ func (r *appBuilderRepo) GetAppBranding(ctx context.Context, appID uuid.UUID) (*
 	}
 	return &domain.AppBranding{
 		ID:               row.ID,
+		UserID:           row.UserID,
 		Name:             row.Name,
 		PackageID:        row.PackageID,
+		IconKey:          row.IconKey,
 		AdNetwork:        row.AdNetwork,
 		AdAppID:          row.AdAppID,
 		EnabledPlatforms: row.EnabledPlatforms,
@@ -138,7 +161,7 @@ func (r *appBuilderRepo) DeleteOwnedJob(ctx context.Context, userID, id uuid.UUI
 // only lands its own terminal state: no counter moves, so the free build is
 // not spent and the user can retry.
 func (r *appBuilderRepo) CompleteForApp(ctx context.Context, jobID, appID uuid.UUID, res domain.JobResult) error {
-	if res == (domain.JobResult{}) {
+	if res.Status == "" {
 		return fmt.Errorf("complete app build job: empty result")
 	}
 	return entx.WithTx2(ctx, r.db, func(tx *db.Tx) error {
@@ -148,26 +171,8 @@ func (r *appBuilderRepo) CompleteForApp(ctx context.Context, jobID, appID uuid.U
 		if err != nil {
 			return fmt.Errorf("get app build job: %w", err)
 		}
-
-		updateJob := tx.AppBuildJob.UpdateOneID(row.ID).
-			SetStatus(res.Status).
-			SetNillableFinishedAt(timePtr(time.Now())).
-			SetDurationMs(res.DurationMS).
-			SetArtifactSize(res.ArtifactSize)
-		if res.Error != "" {
-			updateJob = updateJob.SetError(res.Error)
-		}
-		if res.ExitCode != nil {
-			updateJob = updateJob.SetNillableExitCode(res.ExitCode)
-		}
-		if res.ArtifactPath != "" {
-			updateJob = updateJob.SetArtifactPath(res.ArtifactPath)
-		}
-		if res.ArtifactSHA256 != "" {
-			updateJob = updateJob.SetArtifactSha256(res.ArtifactSHA256)
-		}
-		if err := updateJob.Exec(ctx); err != nil {
-			return fmt.Errorf("finish app build job: %w", err)
+		if err := r.finishJobTx(ctx, tx, row.ID, res); err != nil {
+			return err
 		}
 
 		// Only a succeeded build advances the counters. A failed one lands in
@@ -205,4 +210,12 @@ func (r *appBuilderRepo) CompleteForApp(ctx context.Context, jobID, appID uuid.U
 		}
 		return nil
 	})
+}
+
+// SetAppIconKey marks one app as having a custom icon.
+func (r *appBuilderRepo) SetAppIconKey(ctx context.Context, appID uuid.UUID, key string) error {
+	if err := r.db.App.UpdateOneID(appID).SetIconKey(key).Exec(ctx); err != nil {
+		return fmt.Errorf("set app icon key: %w", err)
+	}
+	return nil
 }

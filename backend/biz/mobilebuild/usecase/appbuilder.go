@@ -13,14 +13,17 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/samber/do"
 
 	"github.com/chaitin/MonkeyCode/backend/biz/mobilebuild/assetstore"
 	"github.com/chaitin/MonkeyCode/backend/biz/mobilebuild/domain"
+	"github.com/chaitin/MonkeyCode/backend/biz/mobilebuild/runner"
 	"github.com/chaitin/MonkeyCode/backend/config"
 	"github.com/chaitin/MonkeyCode/backend/errcode"
 )
@@ -31,12 +34,25 @@ const (
 	releaseDir   = "mobile"
 	artifactName = "authyide.apk"
 
+	// desktopReleaseDir holds the desktop artifacts and the updater manifest the
+	// Tauri client polls. The updater appends the platform name to the endpoint,
+	// so an endpoint of .../desktop/latest.json reads latest-linux.json.
+	desktopReleaseDir   = "desktop"
+	desktopManifestName = "latest-linux.json"
+
 	defaultStaticDir  = "/opt/authyide/data/static"
 	defaultMaxAsset   = 4 << 20
 	defaultAppVersion = 1
+
+	// prereqProbeTimeout caps every host prerequisite probe so a hung tool
+	// cannot stall the status endpoint.
+	prereqProbeTimeout = 3 * time.Second
 )
 
 var pngSignature = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+
+// bundleIDRe is the reverse-domain form Tauri requires from an identifier.
+var bundleIDRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*((\.[A-Za-z][A-Za-z0-9]*)+)$`)
 
 // Usecase is the app builder service boundary.
 type Usecase interface {
@@ -48,14 +64,27 @@ type Usecase interface {
 	UploadAsset(ctx context.Context, slot string, data []byte) (*domain.Branding, error)
 	ClearAsset(ctx context.Context, slot string) (*domain.Branding, error)
 
+	UploadAppIcon(ctx context.Context, owner, appID uuid.UUID, data []byte) error
+	ClearAppIcon(ctx context.Context, owner, appID uuid.UUID) error
+	DownloadAppIcon(ctx context.Context, owner, appID uuid.UUID) (string, error)
+
+	GetAppDesktopBranding(ctx context.Context, owner, appID uuid.UUID) (*domain.AppDesktopBranding, error)
+	SaveAppDesktopBranding(ctx context.Context, owner, appID uuid.UUID, req *domain.UpdateAppDesktopBrandingReq) (*domain.AppDesktopBranding, error)
+	Platforms(ctx context.Context, owner, appID uuid.UUID, desktopLicensed bool) ([]*domain.AppBuildPlatform, error)
+
+	GetDesktopBranding(ctx context.Context) (*domain.DesktopBranding, error)
+	SaveDesktopBranding(ctx context.Context, req *domain.UpdateDesktopBrandingReq) (*domain.DesktopBranding, error)
+	UploadDesktopAsset(ctx context.Context, data []byte) (*domain.DesktopBranding, error)
+	ClearDesktopAsset(ctx context.Context) (*domain.DesktopBranding, error)
+
 	EnqueueBuild(ctx context.Context, userID uuid.UUID, req *domain.EnqueueBuildReq) (*domain.BuildJob, error)
 	EnqueueBuildForApp(ctx context.Context, owner, appID uuid.UUID, req *domain.EnqueueBuildReq) (*domain.BuildJob, error)
 	ListJobs(ctx context.Context, limit int) ([]*domain.BuildJob, error)
 	GetJob(ctx context.Context, id uuid.UUID) (*domain.BuildJob, error)
-	DownloadArtifact(ctx context.Context, id uuid.UUID) (string, error)
-	DownloadOwned(ctx context.Context, owner, id uuid.UUID) (string, error)
-	Publish(ctx context.Context, id uuid.UUID) (*domain.ReleaseStatus, error)
-	PublishOwned(ctx context.Context, owner, id uuid.UUID) (*domain.ReleaseStatus, error)
+	DownloadArtifact(ctx context.Context, id uuid.UUID, channel string) (string, string, error)
+	DownloadOwned(ctx context.Context, owner, id uuid.UUID, channel string) (string, string, error)
+	Publish(ctx context.Context, id uuid.UUID, channel string) (*domain.ReleaseStatus, error)
+	PublishOwned(ctx context.Context, owner, id uuid.UUID, channel string) (*domain.ReleaseStatus, error)
 	Releases(ctx context.Context) (*domain.ReleasesResp, error)
 
 	OtaStatus(ctx context.Context) (*domain.OtaStatus, error)
@@ -63,10 +92,11 @@ type Usecase interface {
 }
 
 type usecase struct {
-	cfg    *config.Config
-	repo   domain.AppBuilderRepo
-	assets assetstore.Store
-	logger *slog.Logger
+	cfg       *config.Config
+	repo      domain.AppBuilderRepo
+	assets    assetstore.Store
+	appAssets assetstore.AppStore
+	logger    *slog.Logger
 }
 
 // NewUsecase creates the app builder service.
@@ -74,12 +104,14 @@ func NewUsecase(i *do.Injector) (Usecase, error) {
 	cfg := do.MustInvoke[*config.Config](i)
 	repo := do.MustInvoke[domain.AppBuilderRepo](i)
 	assets := do.MustInvoke[assetstore.Store](i)
+	appAssets := do.MustInvoke[assetstore.AppStore](i)
 	logger := do.MustInvoke[*slog.Logger](i)
 	return &usecase{
-		cfg:    cfg,
-		repo:   repo,
-		assets: assets,
-		logger: logger.With("component", "app-builder"),
+		cfg:       cfg,
+		repo:      repo,
+		assets:    assets,
+		appAssets: appAssets,
+		logger:    logger.With("component", "app-builder"),
 	}, nil
 }
 
@@ -106,17 +138,77 @@ func (u *usecase) Status(ctx context.Context) (*domain.StatusResp, error) {
 	if max, err := u.repo.MaxVersionCode(ctx); err == nil && max+1 > nextVersionCode {
 		nextVersionCode = max + 1
 	}
-	return &domain.StatusResp{
-		Enabled:         u.Enabled(),
-		Workspace:       mc.Workspace,
-		Platforms:       []string{domain.PlatformAndroid},
-		AssetSlots:      slots,
-		BuildSteps:      domain.BuildSteps,
+
+	resp := &domain.StatusResp{
+		Platforms: []*domain.PlatformStatus{
+			u.androidStatus(ctx, mc, nextVersionCode),
+			u.desktopStatus(ctx, mc),
+		},
 		VersionPattern:  `^\d{6,8}$`,
+		AssetSlots:      slots,
 		MaxAssetBytes:   maxAsset,
-		GradleTimeout:   mc.GradleTimeoutDuration().String(),
 		NextVersionCode: nextVersionCode,
-	}, nil
+	}
+	if mc.PlatformEnabled(domain.PlatformDesktopLinux) {
+		resp.Desktop = &domain.DesktopStatus{
+			PublishableChannels: desktopPublishableChannels(),
+			Unsigned:            mc.UpdaterSigningKeyPath == "",
+		}
+	}
+	return resp, nil
+}
+
+func (u *usecase) androidStatus(ctx context.Context, mc config.MobileBuildConfig, nextVersionCode int) *domain.PlatformStatus {
+	st := &domain.PlatformStatus{
+		Platform:       domain.PlatformAndroid,
+		Enabled:        u.Enabled(),
+		MissingPrereqs: u.missingPrereqs(ctx, domain.PlatformAndroid),
+		BuildSteps:     domain.BuildSteps,
+		Channels:       []string{domain.ChannelAPK},
+		Workspace:      mc.Workspace,
+	}
+	if !st.Enabled {
+		st.Reason = errcode.ErrPlatformDisabled.Error()
+	}
+	return st
+}
+
+func (u *usecase) desktopStatus(ctx context.Context, mc config.MobileBuildConfig) *domain.PlatformStatus {
+	st := &domain.PlatformStatus{
+		Platform:       domain.PlatformDesktopLinux,
+		Enabled:        mc.PlatformEnabled(domain.PlatformDesktopLinux),
+		MissingPrereqs: u.missingPrereqs(ctx, domain.PlatformDesktopLinux),
+		BuildSteps:     domain.DesktopBuildSteps,
+		Channels:       domain.DesktopChannels,
+		Workspace:      mc.DesktopWorkspace,
+	}
+	if !st.Enabled {
+		st.Reason = errcode.ErrPlatformDisabled.Error()
+	}
+	return st
+}
+
+// desktopPublishableChannels is the subset of desktop channels the Tauri
+// updater protocol can consume.
+func desktopPublishableChannels() []string {
+	out := make([]string, 0, 1)
+	for _, c := range domain.DesktopChannels {
+		if domain.ChannelPublishable(c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// missingPrereqs reports the host prerequisites platform lacks.
+func (u *usecase) missingPrereqs(ctx context.Context, platform string) []string {
+	pctx, cancel := context.WithTimeout(ctx, prereqProbeTimeout)
+	defer cancel()
+	return runner.MissingPrereqs(pctx, platform, runner.PrereqProbe{
+		AndroidSDK:       u.cfg.MobileBuild.AndroidSDK,
+		JavaHome:         u.cfg.MobileBuild.JavaHome,
+		DesktopWorkspace: u.cfg.MobileBuild.DesktopWorkspace,
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +375,375 @@ func (u *usecase) ClearAsset(ctx context.Context, slot string) (*domain.Branding
 	return u.fillAssetMeta(ctx, b), nil
 }
 
+// ---------------------------------------------------------------------------
+// Desktop branding
+// ---------------------------------------------------------------------------
+
+// GetDesktopBranding returns the saved desktop branding, or the values the
+// checked-in Tauri shell ships with when the admin has not saved anything yet.
+func (u *usecase) GetDesktopBranding(ctx context.Context) (*domain.DesktopBranding, error) {
+	b, err := u.repo.GetDesktopBranding(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		b = u.defaultDesktopBranding()
+	}
+	return b, nil
+}
+
+// defaultDesktopBranding reads the shell's tauri.conf.json so the form starts
+// from the values the next build would actually use.
+func (u *usecase) defaultDesktopBranding() *domain.DesktopBranding {
+	b := &domain.DesktopBranding{
+		ProductName:      "AuthyIDE",
+		BundleIdentifier: "com.authyide.app",
+	}
+	data, err := os.ReadFile(filepath.Join(u.desktopWorkspace(), "tauri.conf.json"))
+	if err != nil {
+		u.logger.Warn("read tauri.conf.json failed", "error", err)
+		return b
+	}
+	var doc struct {
+		ProductName string `json:"productName"`
+		Identifier  string `json:"identifier"`
+		Plugins     struct {
+			Updater struct {
+				Endpoints []string `json:"endpoints"`
+			} `json:"updater"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		u.logger.Warn("parse tauri.conf.json failed", "error", err)
+		return b
+	}
+	if doc.ProductName != "" {
+		b.ProductName = doc.ProductName
+	}
+	if doc.Identifier != "" {
+		b.BundleIdentifier = doc.Identifier
+	}
+	if len(doc.Plugins.Updater.Endpoints) > 0 {
+		b.UpdaterEndpoint = doc.Plugins.Updater.Endpoints[0]
+	}
+	return b
+}
+
+// SaveDesktopBranding merges the partial update and persists it once the merged
+// value is a valid desktop identity. The icon key is not touched here: the
+// shell icon travels through the asset endpoints.
+func (u *usecase) SaveDesktopBranding(ctx context.Context, req *domain.UpdateDesktopBrandingReq) (*domain.DesktopBranding, error) {
+	if req == nil {
+		return nil, errcode.ErrBrandingInvalid
+	}
+	current, err := u.GetDesktopBranding(ctx)
+	if err != nil {
+		return nil, err
+	}
+	merged := *current
+	if req.ProductName != nil {
+		merged.ProductName = strings.TrimSpace(*req.ProductName)
+	}
+	if req.BundleIdentifier != nil {
+		merged.BundleIdentifier = strings.TrimSpace(*req.BundleIdentifier)
+	}
+	if req.UpdaterEndpoint != nil {
+		merged.UpdaterEndpoint = strings.TrimSpace(*req.UpdaterEndpoint)
+	}
+	if err := validateDesktopBranding(&merged); err != nil {
+		return nil, errcode.ErrBrandingInvalid.Wrap(err)
+	}
+
+	// The merged value is written in full, so a first save of a single field
+	// still leaves the identity usable by the worker.
+	full := &domain.UpdateDesktopBrandingReq{
+		ProductName:      &merged.ProductName,
+		BundleIdentifier: &merged.BundleIdentifier,
+		UpdaterEndpoint:  &merged.UpdaterEndpoint,
+	}
+	return u.repo.SaveDesktopBranding(ctx, full)
+}
+
+func validateDesktopBranding(b *domain.DesktopBranding) error {
+	if b == nil {
+		return errors.New("desktop branding is empty")
+	}
+	if strings.TrimSpace(b.ProductName) == "" || len(b.ProductName) > 100 {
+		return errors.New("product_name must be 1..100 characters")
+	}
+	if !bundleIDRe.MatchString(b.BundleIdentifier) || len(b.BundleIdentifier) > 255 {
+		return fmt.Errorf("bundle_identifier %q must be a dotted reverse domain", b.BundleIdentifier)
+	}
+	if b.UpdaterEndpoint != "" {
+		if err := validateHTTPURL(b.UpdaterEndpoint); err != nil {
+			return fmt.Errorf("updater_endpoint: %w", err)
+		}
+	}
+	return nil
+}
+
+func (u *usecase) desktopWorkspace() string {
+	if dir := strings.TrimSpace(u.cfg.MobileBuild.DesktopWorkspace); dir != "" {
+		return dir
+	}
+	return runner.DefaultDesktopPath
+}
+
+// UploadDesktopAsset replaces the icon the desktop shell bundles. The request
+// carries only the file, so the slot is fixed to the single desktop slot.
+func (u *usecase) UploadDesktopAsset(ctx context.Context, data []byte) (*domain.DesktopBranding, error) {
+	slot := domain.SlotDesktopIcon
+	limit := u.cfg.MobileBuild.MaxAssetBytes
+	if limit <= 0 {
+		limit = defaultMaxAsset
+	}
+	if len(data) == 0 || int64(len(data)) > limit {
+		return nil, errcode.ErrAssetInvalid.Wrap(fmt.Errorf("asset must be 1..%d bytes", limit))
+	}
+	if !hasPNGSignature(data) {
+		return nil, errcode.ErrAssetInvalid.Wrap(errors.New("asset must be a PNG image"))
+	}
+	if err := u.assets.Put(ctx, slot, data); err != nil {
+		return nil, fmt.Errorf("store asset %s: %w", slot, err)
+	}
+	b, err := u.repo.SetDesktopIconKey(ctx, slot)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// ClearDesktopAsset removes the custom desktop icon so the shell falls back to
+// its bundled default.
+func (u *usecase) ClearDesktopAsset(ctx context.Context) (*domain.DesktopBranding, error) {
+	slot := domain.SlotDesktopIcon
+	if err := u.assets.Delete(ctx, slot); err != nil {
+		return nil, fmt.Errorf("delete asset %s: %w", slot, err)
+	}
+	return u.repo.ClearDesktopIconKey(ctx)
+}
+
+// UploadAppIcon stores one app's custom icon and marks it on the apps table.
+func (u *usecase) UploadAppIcon(ctx context.Context, owner, appID uuid.UUID, data []byte) error {
+	if err := u.verifyOwnership(ctx, owner, appID); err != nil {
+		return err
+	}
+	limit := u.cfg.MobileBuild.MaxAssetBytes
+	if limit <= 0 {
+		limit = defaultMaxAsset
+	}
+	if len(data) == 0 || int64(len(data)) > limit {
+		return errcode.ErrAssetInvalid.Wrap(fmt.Errorf("asset must be 1..%d bytes", limit))
+	}
+	if !hasPNGSignature(data) {
+		return errcode.ErrAssetInvalid.Wrap(errors.New("asset must be a PNG image"))
+	}
+	if err := u.appAssets.Put(ctx, appID, data); err != nil {
+		return fmt.Errorf("store app icon: %w", err)
+	}
+	return u.repo.SetAppIconKey(ctx, appID, appID.String())
+}
+
+// ClearAppIcon removes one app's custom icon and falls back to the instance default.
+func (u *usecase) ClearAppIcon(ctx context.Context, owner, appID uuid.UUID) error {
+	if err := u.verifyOwnership(ctx, owner, appID); err != nil {
+		return err
+	}
+	if err := u.appAssets.Delete(ctx, appID); err != nil {
+		return fmt.Errorf("delete app icon: %w", err)
+	}
+	return u.repo.SetAppIconKey(ctx, appID, "")
+}
+
+// DownloadAppIcon resolves one app's icon for preview. It reports
+// ErrBuildArtifactMissing when the app has no custom icon, so the caller falls
+// back to the template's built-in default.
+func (u *usecase) DownloadAppIcon(ctx context.Context, owner, appID uuid.UUID) (string, error) {
+	if err := u.verifyOwnership(ctx, owner, appID); err != nil {
+		return "", err
+	}
+	path, err := u.appAssets.Path(ctx, appID)
+	if err != nil {
+		if errors.Is(err, assetstore.ErrEmpty) {
+			return "", errcode.ErrBuildArtifactMissing
+		}
+		return "", fmt.Errorf("resolve app icon: %w", err)
+	}
+	return path, nil
+}
+
+// defaultAppDesktopBranding derives one app's desktop identity from the app
+// row. package_id is always a dotted reverse domain on mobile, so appending a
+// fixed suffix keeps the Tauri identifier legal without user input.
+func defaultAppDesktopBranding(app *domain.AppBranding) *domain.AppDesktopBranding {
+	d := domain.DefaultDesktopBranding(app)
+	return &domain.AppDesktopBranding{
+		AppID:            app.ID,
+		ProductName:      d.ProductName,
+		BundleIdentifier: d.BundleIdentifier,
+	}
+}
+
+// GetAppDesktopBranding returns one app's desktop identity with the app row as
+// the fallback. Saving is what makes the identity survive a rename of the app.
+func (u *usecase) GetAppDesktopBranding(ctx context.Context, owner, appID uuid.UUID) (*domain.AppDesktopBranding, error) {
+	if err := u.verifyOwnership(ctx, owner, appID); err != nil {
+		return nil, err
+	}
+	b, err := u.repo.GetAppDesktopBranding(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	if b != nil {
+		return b, nil
+	}
+	app, err := u.repo.GetAppBranding(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	if app == nil {
+		return nil, errcode.ErrAppNotFound
+	}
+	return defaultAppDesktopBranding(app), nil
+}
+
+// SaveAppDesktopBranding merges the partial update and writes the merged value
+// in full, so a first save of one field still leaves a usable identity.
+func (u *usecase) SaveAppDesktopBranding(ctx context.Context, owner, appID uuid.UUID, req *domain.UpdateAppDesktopBrandingReq) (*domain.AppDesktopBranding, error) {
+	if err := u.verifyOwnership(ctx, owner, appID); err != nil {
+		return nil, err
+	}
+	if req == nil {
+		return nil, errcode.ErrBrandingInvalid
+	}
+	current, err := u.GetAppDesktopBranding(ctx, owner, appID)
+	if err != nil {
+		return nil, err
+	}
+	merged := *current
+	if req.ProductName != nil {
+		merged.ProductName = strings.TrimSpace(*req.ProductName)
+	}
+	if req.BundleIdentifier != nil {
+		merged.BundleIdentifier = strings.TrimSpace(*req.BundleIdentifier)
+	}
+	if err := validateAppDesktopBranding(&merged); err != nil {
+		return nil, errcode.ErrBrandingInvalid.Wrap(err)
+	}
+	full := &domain.UpdateAppDesktopBrandingReq{
+		ProductName:      &merged.ProductName,
+		BundleIdentifier: &merged.BundleIdentifier,
+	}
+	return u.repo.SaveAppDesktopBranding(ctx, appID, full)
+}
+
+func validateAppDesktopBranding(b *domain.AppDesktopBranding) error {
+	if b == nil {
+		return errors.New("app desktop branding is empty")
+	}
+	if strings.TrimSpace(b.ProductName) == "" || len(b.ProductName) > 100 {
+		return errors.New("product_name must be 1..100 characters")
+	}
+	if !bundleIDRe.MatchString(b.BundleIdentifier) || len(b.BundleIdentifier) > 255 {
+		return fmt.Errorf("bundle_identifier %q must be a dotted reverse domain", b.BundleIdentifier)
+	}
+	return nil
+}
+
+// desktopIdentityFor resolves the desktop identity one job builds with. An app
+// builds under its own identity; an admin-console build uses the instance
+// singleton. The app's updater endpoint is derived from its id so each app
+// publishes into its own update source.
+func (u *usecase) desktopIdentityFor(ctx context.Context, owner uuid.UUID, app *domain.AppBranding) (*domain.DesktopBranding, error) {
+	if app != nil {
+		b, err := u.GetAppDesktopBranding(ctx, owner, app.ID)
+		if err != nil {
+			return nil, err
+		}
+		if b != nil && strings.TrimSpace(b.ProductName) != "" && strings.TrimSpace(b.BundleIdentifier) != "" {
+			return &domain.DesktopBranding{
+				ProductName:      b.ProductName,
+				BundleIdentifier: b.BundleIdentifier,
+				UpdaterEndpoint:  u.appUpdaterEndpoint(app.ID),
+			}, nil
+		}
+	}
+	b, err := u.repo.GetDesktopBranding(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil || strings.TrimSpace(b.ProductName) == "" || strings.TrimSpace(b.BundleIdentifier) == "" {
+		return nil, errcode.ErrBrandingInvalid.Wrap(errors.New("desktop branding is not configured"))
+	}
+	return b, nil
+}
+
+// Platforms lists every build target of one app with the reason each is or is
+// not buildable. desktopLicensed comes from the user's entitlement, which this
+// module does not read: the entitlement belongs to the app module.
+func (u *usecase) Platforms(ctx context.Context, owner, appID uuid.UUID, desktopLicensed bool) ([]*domain.AppBuildPlatform, error) {
+	if err := u.verifyOwnership(ctx, owner, appID); err != nil {
+		return nil, err
+	}
+	app, err := u.repo.GetAppBranding(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	if app == nil {
+		return nil, errcode.ErrAppNotFound
+	}
+
+	out := make([]*domain.AppBuildPlatform, 0, len(domain.BuildPlatforms))
+	for _, platform := range domain.BuildPlatforms {
+		st := &domain.AppBuildPlatform{Platform: platform}
+		switch reason := u.platformReason(platform, app, desktopLicensed); {
+		case reason == "":
+			st.Enabled = true
+		default:
+			st.Reason = reason
+		}
+		if platform == domain.PlatformDesktopLinux {
+			st.UpdaterEndpoint = u.appUpdaterEndpoint(appID)
+		}
+		out = append(out, st)
+	}
+	return out, nil
+}
+
+// platformReason returns the human-readable blocker of one platform, empty when
+// the platform is buildable. The order is the order a user should fix things in.
+func (u *usecase) platformReason(platform string, app *domain.AppBranding, desktopLicensed bool) string {
+	mc := u.cfg.MobileBuild
+	if !mc.Enabled {
+		return errcode.ErrPlatformDisabled.Error()
+	}
+	if !mc.PlatformEnabled(platform) {
+		return errcode.ErrPlatformDisabled.Error()
+	}
+	if !platformEnabled(app.EnabledPlatforms, platform) {
+		return errcode.ErrAppInvalidPlatform.Error()
+	}
+	if platform == domain.PlatformDesktopLinux && !desktopLicensed {
+		return errcode.ErrAppDesktopUnlicensed.Error()
+	}
+	return ""
+}
+
+// verifyOwnership checks that one app belongs to one user.
+func (u *usecase) verifyOwnership(ctx context.Context, owner, appID uuid.UUID) error {
+	row, err := u.repo.GetAppBranding(ctx, appID)
+	if err != nil {
+		return fmt.Errorf("get app: %w", err)
+	}
+	if row == nil {
+		return errcode.ErrAppNotFound
+	}
+	if row.UserID != owner {
+		return errcode.ErrAppNotFound
+	}
+	return nil
+}
+
 func validateBranding(b *domain.Branding) error {
 	if b == nil {
 		return errors.New("branding is empty")
@@ -359,12 +820,19 @@ func (u *usecase) enqueueBuild(
 	if req == nil {
 		return nil, errcode.ErrBrandingInvalid
 	}
-	req.Platform = strings.TrimSpace(req.Platform)
+	// The request may name the app vocabulary (desktop) or the builder
+	// vocabulary (desktop-linux); everything downstream speaks canonical.
+	req.Platform = domain.NormalizePlatform(req.Platform)
 	if req.Platform == "" {
 		req.Platform = domain.PlatformAndroid
 	}
-	if req.Platform != domain.PlatformAndroid {
-		return nil, errcode.ErrBrandingInvalid.Wrap(fmt.Errorf("unsupported platform %q", req.Platform))
+	if !domain.PlatformValid(req.Platform) {
+		return nil, errcode.ErrPlatformInvalid.Wrap(
+			fmt.Errorf("platform %q is not buildable", req.Platform))
+	}
+	if !u.cfg.MobileBuild.PlatformEnabled(req.Platform) {
+		return nil, errcode.ErrPlatformDisabled.Wrap(
+			fmt.Errorf("platform %q is not enabled on this instance", req.Platform))
 	}
 	if app != nil && !platformEnabled(app.EnabledPlatforms, req.Platform) {
 		return nil, errcode.ErrAppInvalidPlatform.Wrap(
@@ -394,15 +862,21 @@ func (u *usecase) enqueueBuild(
 		}
 	}
 
-	current, err := u.repo.GetBranding(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if current == nil {
-		current = u.defaultBranding()
-	}
-	if strings.TrimSpace(current.Name) == "" || strings.TrimSpace(current.ServerURL) == "" {
-		return nil, errcode.ErrBrandingInvalid.Wrap(errors.New("branding is not configured"))
+	if req.Platform == domain.PlatformDesktopLinux {
+		if _, err := u.desktopIdentityFor(ctx, userID, app); err != nil {
+			return nil, err
+		}
+	} else {
+		current, err := u.repo.GetBranding(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if current == nil {
+			current = u.defaultBranding()
+		}
+		if strings.TrimSpace(current.Name) == "" || strings.TrimSpace(current.ServerURL) == "" {
+			return nil, errcode.ErrBrandingInvalid.Wrap(errors.New("mobile branding is not configured"))
+		}
 	}
 
 	if app != nil {
@@ -415,6 +889,7 @@ func (u *usecase) enqueueBuild(
 	}
 
 	var maxCode int
+	var err error
 	if app != nil {
 		maxCode, err = u.repo.MaxVersionCodeForApp(ctx, app.ID)
 	} else {
@@ -440,14 +915,16 @@ func (u *usecase) enqueueBuild(
 	return withDownloadURL(job), nil
 }
 
-// platformEnabled reports whether platform is in the app's platform set; an
-// empty set accepts the default platform.
+// platformEnabled reports whether platform is inside one app's target set. Both
+// sides are normalized so a set stored in the app vocabulary (desktop) matches
+// the builder vocabulary (desktop-linux). An empty set accepts any platform.
 func platformEnabled(enabled []string, platform string) bool {
 	if len(enabled) == 0 {
 		return true
 	}
+	want := domain.NormalizePlatform(platform)
 	for _, p := range enabled {
-		if p == platform {
+		if domain.NormalizePlatform(p) == want {
 			return true
 		}
 	}
@@ -473,49 +950,90 @@ func (u *usecase) GetJob(ctx context.Context, id uuid.UUID) (*domain.BuildJob, e
 	if job == nil {
 		return nil, errcode.ErrBuildNotFound
 	}
+	// The detail view is the only place the channel set is exposed: desktop
+	// jobs render one download and publish button per channel.
+	artifacts, err := u.repo.ListArtifacts(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	job.Artifacts = artifacts
 	return withDownloadURL(job), nil
 }
 
 // DownloadArtifact resolves the artifact of a succeeded job. The path is
-// validated so the handler can stream it without a second check.
-func (u *usecase) DownloadArtifact(ctx context.Context, id uuid.UUID) (string, error) {
+// validated so the handler can stream it without a second check, and the file
+// name drives the Content-Disposition header. An empty channel resolves to the
+// job's primary channel.
+func (u *usecase) DownloadArtifact(ctx context.Context, id uuid.UUID, channel string) (string, string, error) {
 	job, err := u.repo.GetJob(ctx, id)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if job == nil {
-		return "", errcode.ErrBuildNotFound
+		return "", "", errcode.ErrBuildNotFound
 	}
-	return u.downloadJob(job)
+	return u.resolveArtifact(ctx, job, channel)
 }
 
 // DownloadOwned resolves the artifact of one of the owner's jobs.
-func (u *usecase) DownloadOwned(ctx context.Context, owner, id uuid.UUID) (string, error) {
+func (u *usecase) DownloadOwned(ctx context.Context, owner, id uuid.UUID, channel string) (string, string, error) {
 	job, err := u.repo.GetOwnedJob(ctx, owner, id)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if job == nil {
-		return "", errcode.ErrBuildNotFound
+		return "", "", errcode.ErrBuildNotFound
 	}
-	return u.downloadJob(job)
+	return u.resolveArtifact(ctx, job, channel)
 }
 
-func (u *usecase) downloadJob(job *domain.BuildJob) (string, error) {
+// resolveArtifact maps one job channel to a file the handler can serve. The
+// primary channel is recorded on the job row and every other channel in the
+// artifact table, and all of them land in the job's own artifact directory.
+func (u *usecase) resolveArtifact(ctx context.Context, job *domain.BuildJob, channel string) (string, string, error) {
 	if job == nil {
-		return "", errcode.ErrBuildNotFound
+		return "", "", errcode.ErrBuildNotFound
 	}
 	if job.Status != domain.BuildStatusSucceeded {
-		return "", errcode.ErrBuildNotSucceeded
+		return "", "", errcode.ErrBuildNotSucceeded
 	}
-	if job.ArtifactPath == "" {
-		return "", errcode.ErrBuildArtifactMissing
+	primary := domain.PrimaryChannelOf(job.Platform)
+	channel = strings.TrimSpace(channel)
+	if channel == "" {
+		channel = primary
 	}
-	fi, err := os.Stat(job.ArtifactPath)
+	if !domain.ChannelValid(channel) {
+		return "", "", errcode.ErrChannelInvalid.Wrap(
+			fmt.Errorf("channel %q is not a build channel", channel))
+	}
+
+	var name string
+	var path string
+	if channel == primary {
+		path = job.ArtifactPath
+		name = filepath.Base(path)
+		if name == "" {
+			name = artifactName
+		}
+	} else {
+		info, err := u.repo.GetArtifact(ctx, job.ID, channel)
+		if err != nil {
+			return "", "", err
+		}
+		if info == nil {
+			return "", "", errcode.ErrBuildArtifactMissing
+		}
+		name = info.FileName
+		path = info.Path
+	}
+	if path == "" || name == "" {
+		return "", "", errcode.ErrBuildArtifactMissing
+	}
+	fi, err := os.Stat(path)
 	if err != nil || fi.Size() == 0 {
-		return "", errcode.ErrBuildArtifactMissing
+		return "", "", errcode.ErrBuildArtifactMissing
 	}
-	return job.ArtifactPath, nil
+	return path, name, nil
 }
 
 // withDownloadURL exposes the download endpoint only for jobs whose artifact
@@ -535,10 +1053,10 @@ func buildDownloadPath(id uuid.UUID) string {
 // Releases
 // ---------------------------------------------------------------------------
 
-// Publish copies the artifact into the static tree and points the native
-// update manifest at it. Both side effects are rolled back if either one
-// fails, so a partial release never gets served.
-func (u *usecase) Publish(ctx context.Context, id uuid.UUID) (*domain.ReleaseStatus, error) {
+// Publish promotes a succeeded job to the update channel of its platform. The
+// artifact copy and the manifest write are rolled back together, so a partial
+// release never gets served.
+func (u *usecase) Publish(ctx context.Context, id uuid.UUID, channel string) (*domain.ReleaseStatus, error) {
 	job, err := u.repo.GetJob(ctx, id)
 	if err != nil {
 		return nil, err
@@ -546,11 +1064,11 @@ func (u *usecase) Publish(ctx context.Context, id uuid.UUID) (*domain.ReleaseSta
 	if job == nil {
 		return nil, errcode.ErrBuildNotFound
 	}
-	return u.publishJob(ctx, job)
+	return u.publishJob(ctx, job, channel)
 }
 
 // PublishOwned publishes one of the owner's jobs to the release channel.
-func (u *usecase) PublishOwned(ctx context.Context, owner, id uuid.UUID) (*domain.ReleaseStatus, error) {
+func (u *usecase) PublishOwned(ctx context.Context, owner, id uuid.UUID, channel string) (*domain.ReleaseStatus, error) {
 	job, err := u.repo.GetOwnedJob(ctx, owner, id)
 	if err != nil {
 		return nil, err
@@ -558,16 +1076,25 @@ func (u *usecase) PublishOwned(ctx context.Context, owner, id uuid.UUID) (*domai
 	if job == nil {
 		return nil, errcode.ErrBuildNotFound
 	}
-	return u.publishJob(ctx, job)
+	return u.publishJob(ctx, job, channel)
 }
 
-func (u *usecase) publishJob(ctx context.Context, job *domain.BuildJob) (*domain.ReleaseStatus, error) {
+func (u *usecase) publishJob(ctx context.Context, job *domain.BuildJob, channel string) (*domain.ReleaseStatus, error) {
 	if job == nil {
 		return nil, errcode.ErrBuildNotFound
 	}
 	if job.Status != domain.BuildStatusSucceeded {
 		return nil, errcode.ErrBuildNotSucceeded
 	}
+	if job.Platform == domain.PlatformDesktopLinux {
+		return u.publishDesktopJob(ctx, job, channel)
+	}
+	return u.publishMobileJob(ctx, job)
+}
+
+// publishMobileJob copies the APK into the static tree and points the native
+// app-version manifest at it.
+func (u *usecase) publishMobileJob(ctx context.Context, job *domain.BuildJob) (*domain.ReleaseStatus, error) {
 	if job.ArtifactPath == "" {
 		return nil, errcode.ErrBuildArtifactMissing
 	}
@@ -576,7 +1103,7 @@ func (u *usecase) publishJob(ctx context.Context, job *domain.BuildJob) (*domain
 	}
 
 	version := job.TargetVersion
-	current, err := u.ReadManifest(ctx, domain.PlatformAndroid)
+	current, err := u.readJobManifest(job)
 	if err != nil {
 		return nil, err
 	}
@@ -585,7 +1112,7 @@ func (u *usecase) publishJob(ctx context.Context, job *domain.BuildJob) (*domain
 			fmt.Errorf("manifest already at %s", current.Version))
 	}
 
-	dest := filepath.Join(u.staticDir(), releaseDir, version, artifactName)
+	dest := u.mobileArtifactDest(job, version)
 	if err := copyFile(job.ArtifactPath, dest); err != nil {
 		return nil, err
 	}
@@ -594,9 +1121,8 @@ func (u *usecase) publishJob(ctx context.Context, job *domain.BuildJob) (*domain
 		os.Remove(filepath.Dir(dest))
 	}
 
-	manifest := domain.ReleaseManifest{Version: version, URL: u.artifactURL(version)}
-	manifestPath := filepath.Join(u.staticDir(), manifestDir, domain.PlatformAndroid+".json")
-	if err := writeManifestAtomic(manifestPath, manifest); err != nil {
+	manifest := domain.ReleaseManifest{Version: version, URL: u.mobileArtifactPublicURL(job, version)}
+	if err := writeManifestAtomic(u.mobileManifestPath(job), manifest); err != nil {
 		rollback()
 		return nil, err
 	}
@@ -607,7 +1133,95 @@ func (u *usecase) publishJob(ctx context.Context, job *domain.BuildJob) (*domain
 
 	u.logger.InfoContext(ctx, "native release published",
 		"version", version, "version_code", job.VersionCode, "url", manifest.URL)
-	return u.ReleaseStatus(ctx, domain.PlatformAndroid)
+	return u.jobReleaseStatus(job, manifest.URL, job.ArtifactSHA256)
+}
+
+// publishDesktopJob promotes one desktop channel to the Tauri updater source.
+// Only AppImage carries the updater protocol; deb and rpm are upgraded by the
+// package manager, so they stay download-only.
+func (u *usecase) publishDesktopJob(ctx context.Context, job *domain.BuildJob, channel string) (*domain.ReleaseStatus, error) {
+	if !u.cfg.MobileBuild.PlatformEnabled(job.Platform) {
+		return nil, errcode.ErrPlatformDisabled.Wrap(errors.New("desktop builds are disabled"))
+	}
+	channel = strings.TrimSpace(channel)
+	if channel == "" {
+		channel = domain.ChannelAppImage
+	}
+	if !domain.ChannelPublishable(channel) {
+		return nil, errcode.ErrChannelNotPublishable.Wrap(
+			fmt.Errorf("channel %q is not an update source", channel))
+	}
+
+	path, name, err := u.resolveArtifact(ctx, job, channel)
+	if err != nil {
+		return nil, err
+	}
+	version := job.TargetVersion
+
+	current, err := u.readJobDesktopManifest(job)
+	if err != nil {
+		return nil, err
+	}
+	if current != nil && !versionGreater(version, current.Version) {
+		return nil, errcode.ErrReleaseVersionTooOld.Wrap(
+			fmt.Errorf("manifest already at %s", current.Version))
+	}
+
+	dest := u.desktopArtifactDest(job, version, name)
+	if err := copyFile(path, dest); err != nil {
+		return nil, err
+	}
+	rollback := func() {
+		os.Remove(dest)
+		os.Remove(filepath.Dir(dest))
+	}
+
+	sha := ""
+	if sum, err := sha256File(path); err == nil {
+		sha = sum
+	}
+	manifest := domain.DesktopReleaseManifest{
+		Version:   version,
+		PubDate:   time.Now().UTC().Format(time.RFC3339),
+		URL:       u.desktopArtifactPublicURL(job, version, name),
+		Signature: "",
+	}
+	if u.cfg.MobileBuild.UpdaterSigningKeyPath == "" {
+		// An unsigned manifest is kept as a version record and a download
+		// entry; the client refuses to update without a valid signature.
+		u.logger.WarnContext(ctx, "desktop release published unsigned; clients will not update",
+			"version", version)
+	}
+	if err := writeDesktopManifestAtomic(u.desktopManifestPath(job), manifest); err != nil {
+		rollback()
+		return nil, err
+	}
+	if err := u.repo.MarkJobPublished(ctx, job.ID, sha); err != nil {
+		rollback()
+		return nil, err
+	}
+
+	u.logger.InfoContext(ctx, "desktop release published",
+		"version", version, "channel", channel, "url", manifest.URL, "unsigned", manifest.Signature == "")
+	return u.jobReleaseStatus(job, manifest.URL, sha)
+}
+
+// jobReleaseStatus reports the state of one job's release train, resolving the
+// artifact URL it just published rather than re-reading the manifest.
+func (u *usecase) jobReleaseStatus(job *domain.BuildJob, artifactURL, sha256sum string) (*domain.ReleaseStatus, error) {
+	platform := domain.PlatformAndroid
+	enabled := u.Enabled() && u.cfg.MobileBuild.PlatformEnabled(platform)
+	if job != nil && job.Platform == domain.PlatformDesktopLinux {
+		platform = domain.PlatformDesktopLinux
+	}
+	return &domain.ReleaseStatus{
+		Platform:        platform,
+		Enabled:         enabled,
+		Manifest:        &domain.ReleaseManifest{Version: job.TargetVersion, URL: artifactURL},
+		ArtifactURL:     artifactURL,
+		ArtifactPresent: true,
+		ArtifactSHA256:  sha256sum,
+	}, nil
 }
 
 func (u *usecase) Releases(ctx context.Context) (*domain.ReleasesResp, error) {
@@ -619,7 +1233,15 @@ func (u *usecase) Releases(ctx context.Context) (*domain.ReleasesResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &domain.ReleasesResp{Native: []*domain.ReleaseStatus{st}, Ota: ota}, nil
+	resp := &domain.ReleasesResp{Native: []*domain.ReleaseStatus{st}, Ota: ota}
+	if u.cfg.MobileBuild.PlatformEnabled(domain.PlatformDesktopLinux) {
+		desktop, err := u.DesktopReleaseStatus(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp.Desktop = desktop
+	}
+	return resp, nil
 }
 
 // ReleaseStatus reads the native manifest and verifies the artifact it points
@@ -632,27 +1254,57 @@ func (u *usecase) ReleaseStatus(ctx context.Context, platform string) (*domain.R
 	if err != nil {
 		return nil, err
 	}
-	st := &domain.ReleaseStatus{Platform: platform, Enabled: u.cfg.MobileBuild.Enabled}
+	st := &domain.ReleaseStatus{
+		Platform: platform,
+		Enabled:  u.Enabled() && u.cfg.MobileBuild.PlatformEnabled(platform),
+	}
 	if manifest == nil {
 		return st, nil
 	}
 	st.Manifest = manifest
 	st.ArtifactURL = manifest.URL
+	present, sum := u.servedArtifactInfo(manifest.URL)
+	st.ArtifactPresent = present
+	st.ArtifactSHA256 = sum
+	return st, nil
+}
 
-	local := u.localArtifactPath(manifest.URL)
-	if local == "" {
+// DesktopReleaseStatus reads the Tauri updater manifest and verifies the
+// artifact it points at is actually served from disk.
+func (u *usecase) DesktopReleaseStatus(ctx context.Context) (*domain.DesktopReleaseStatus, error) {
+	st := &domain.DesktopReleaseStatus{
+		Platform: domain.PlatformDesktopLinux,
+		Enabled:  u.cfg.MobileBuild.PlatformEnabled(domain.PlatformDesktopLinux),
+		Unsigned: u.cfg.MobileBuild.UpdaterSigningKeyPath == "",
+	}
+	manifest, err := u.ReadDesktopManifest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if manifest == nil {
 		return st, nil
+	}
+	st.Manifest = manifest
+	st.ArtifactPresent, st.ArtifactSHA256 = u.servedArtifactInfo(manifest.URL)
+	return st, nil
+}
+
+// servedArtifactInfo maps a public artifact URL back to disk and reports what
+// the client actually downloads.
+func (u *usecase) servedArtifactInfo(rawURL string) (bool, string) {
+	local := u.localArtifactPath(rawURL)
+	if local == "" {
+		return false, ""
 	}
 	fi, err := os.Stat(local)
 	if err != nil || fi.Size() == 0 {
-		return st, nil
+		return false, ""
 	}
-	st.ArtifactPresent = true
 	sum, err := sha256File(local)
-	if err == nil {
-		st.ArtifactSHA256 = sum
+	if err != nil {
+		return true, ""
 	}
-	return st, nil
+	return true, sum
 }
 
 func (u *usecase) ReadManifest(ctx context.Context, platform string) (*domain.ReleaseManifest, error) {
@@ -680,8 +1332,32 @@ func readManifestFile(path string) (*domain.ReleaseManifest, error) {
 	return &m, nil
 }
 
+func readDesktopManifestFile(path string) (*domain.DesktopReleaseManifest, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read desktop release manifest: %w", err)
+	}
+	var m domain.DesktopReleaseManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("parse desktop release manifest: %w", err)
+	}
+	if m.Version == "" || m.URL == "" {
+		return nil, nil
+	}
+	return &m, nil
+}
+
 func (u *usecase) ReadOtaManifest(ctx context.Context) (*domain.ReleaseManifest, error) {
 	return readManifestFile(filepath.Join(u.staticDir(), otaDir, domain.PlatformAndroid+".json"))
+}
+
+// ReadDesktopManifest returns the Tauri updater record, or nil when the
+// desktop channel has never been published.
+func (u *usecase) ReadDesktopManifest(ctx context.Context) (*domain.DesktopReleaseManifest, error) {
+	return readDesktopManifestFile(filepath.Join(u.staticDir(), desktopReleaseDir, desktopManifestName))
 }
 
 // ---------------------------------------------------------------------------
@@ -754,7 +1430,74 @@ func (u *usecase) publicBase() string {
 // artifactURL is the public address the native client downloads the APK from.
 func (u *usecase) artifactURL(version string) string {
 	prefix := strings.TrimRight(strings.TrimSpace(u.cfg.StaticFiles.RoutePrefix), "/")
-	return u.publicBase() + prefix + "/" + releaseDir + "/" + version + "/" + artifactName
+	return u.publicBase() + prefix + domain.MobileArtifactRelPath("", version)
+}
+
+// desktopArtifactURL is the public address of one desktop artifact.
+func (u *usecase) desktopArtifactURL(version, name string) string {
+	prefix := strings.TrimRight(strings.TrimSpace(u.cfg.StaticFiles.RoutePrefix), "/")
+	return u.publicBase() + prefix + domain.DesktopArtifactRelPath("", version, name)
+}
+
+// appUpdaterEndpoint is the URL the desktop client of one app polls. It is
+// derived from the app id rather than stored, so an app can never be pointed
+// at another app's update source.
+func (u *usecase) appUpdaterEndpoint(appID uuid.UUID) string {
+	return domain.DesktopUpdaterEndpoint(u.publicBase(), u.cfg.StaticFiles.RoutePrefix, appID.String())
+}
+
+// mobileManifestPath is the on-disk native update manifest of one job.
+func (u *usecase) mobileManifestPath(job *domain.BuildJob) string {
+	appID := appIDString(job)
+	return filepath.Join(u.staticDir(), domain.MobileManifestRelPath(appID, domain.PlatformAndroid))
+}
+
+// desktopManifestPath is the on-disk Tauri updater manifest of one job.
+func (u *usecase) desktopManifestPath(job *domain.BuildJob) string {
+	return filepath.Join(u.staticDir(), domain.DesktopManifestRelPath(appIDString(job)))
+}
+
+// mobileArtifactDest is the on-disk destination of one job's APK.
+func (u *usecase) mobileArtifactDest(job *domain.BuildJob, version string) string {
+	return filepath.Join(u.staticDir(), domain.MobileArtifactRelPath(appIDString(job), version))
+}
+
+// desktopArtifactDest is the on-disk destination of one job's desktop package.
+func (u *usecase) desktopArtifactDest(job *domain.BuildJob, version, name string) string {
+	return filepath.Join(u.staticDir(), domain.DesktopArtifactRelPath(appIDString(job), version, name))
+}
+
+// mobileArtifactPublicURL is the download address of one job's APK.
+func (u *usecase) mobileArtifactPublicURL(job *domain.BuildJob, version string) string {
+	return u.publicBase() + u.cfg.StaticFiles.RoutePrefix +
+		domain.MobileArtifactRelPath(appIDString(job), version)
+}
+
+// desktopArtifactPublicURL is the download address of one job's desktop
+// package.
+func (u *usecase) desktopArtifactPublicURL(job *domain.BuildJob, version, name string) string {
+	return u.publicBase() + u.cfg.StaticFiles.RoutePrefix +
+		domain.DesktopArtifactRelPath(appIDString(job), version, name)
+}
+
+// readJobManifest reads the native update manifest of one job's release train.
+func (u *usecase) readJobManifest(job *domain.BuildJob) (*domain.ReleaseManifest, error) {
+	return readManifestFile(u.mobileManifestPath(job))
+}
+
+// readJobDesktopManifest reads the Tauri updater manifest of one job's release
+// train. It reports nil when no manifest exists yet.
+func (u *usecase) readJobDesktopManifest(job *domain.BuildJob) (*domain.DesktopReleaseManifest, error) {
+	return readDesktopManifestFile(u.desktopManifestPath(job))
+}
+
+// appIDString is the release-train key of one job; empty for admin-console
+// builds, which publish into the instance train.
+func appIDString(job *domain.BuildJob) string {
+	if job == nil || job.AppID == uuid.Nil {
+		return ""
+	}
+	return job.AppID.String()
 }
 
 // localArtifactPath maps a public static URL back to the local file so the
@@ -809,13 +1552,13 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
-// writeManifestAtomic writes to a temp file and renames, so a reader never
+// writeJSONAtomic writes to a temp file and renames, so a reader never
 // observes a half-written manifest.
-func writeManifestAtomic(path string, manifest domain.ReleaseManifest) error {
+func writeJSONAtomic(path string, v any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create manifest dir: %w", err)
 	}
-	data, err := json.Marshal(manifest)
+	data, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("encode manifest: %w", err)
 	}
@@ -846,6 +1589,14 @@ func writeManifestAtomic(path string, manifest domain.ReleaseManifest) error {
 		return fmt.Errorf("replace manifest: %w", err)
 	}
 	return nil
+}
+
+func writeManifestAtomic(path string, manifest domain.ReleaseManifest) error {
+	return writeJSONAtomic(path, manifest)
+}
+
+func writeDesktopManifestAtomic(path string, manifest domain.DesktopReleaseManifest) error {
+	return writeJSONAtomic(path, manifest)
 }
 
 func sha256File(path string) (string, error) {

@@ -21,14 +21,31 @@ type AppBuildService interface {
 	Get(ctx context.Context, owner, id uuid.UUID) (*AppBuildJob, error)
 	// List returns the app's job history, newest first.
 	List(ctx context.Context, owner, appID uuid.UUID) ([]*AppBuildJob, error)
-	// Download resolves the artifact path of one of the owner's own jobs.
-	Download(ctx context.Context, owner, id uuid.UUID) (AppBuildArtifact, error)
+	// ListAll returns every job of one app regardless of owner; only an admin
+	// may call it.
+	ListAll(ctx context.Context, appID uuid.UUID) ([]*AppBuildJob, error)
+	// Download resolves the artifact of one channel of one of the owner's own
+	// jobs. An empty channel resolves to the job's primary channel.
+	Download(ctx context.Context, owner, id uuid.UUID, channel string) (AppBuildArtifact, error)
 	// Publish promotes one of the owner's succeeded jobs to the update channel.
-	Publish(ctx context.Context, owner, id uuid.UUID) (*AppBuildRelease, error)
+	Publish(ctx context.Context, owner, id uuid.UUID, channel string) (*AppBuildRelease, error)
 	// Delete removes one of the owner's own jobs.
 	Delete(ctx context.Context, owner, id uuid.UUID) error
 	// CountToday counts the user's jobs across every app in the last 24 hours.
 	CountToday(ctx context.Context, owner uuid.UUID) (int, error)
+	// UploadIcon stores one app's custom icon.
+	UploadIcon(ctx context.Context, owner, appID uuid.UUID, data []byte) error
+	// ClearIcon removes one app's custom icon.
+	ClearIcon(ctx context.Context, owner, appID uuid.UUID) error
+	// DownloadIcon resolves one app's custom icon for preview.
+	DownloadIcon(ctx context.Context, owner, appID uuid.UUID) (AppBuildArtifact, error)
+	// Platforms lists every build target of one app with the reason each is or
+	// is not buildable.
+	Platforms(ctx context.Context, owner, appID uuid.UUID, desktopLicensed bool) ([]AppBuildPlatform, error)
+	// GetDesktopBranding returns one app's desktop identity.
+	GetDesktopBranding(ctx context.Context, owner, appID uuid.UUID) (*AppDesktopBranding, error)
+	// SaveDesktopBranding stores one app's desktop identity.
+	SaveDesktopBranding(ctx context.Context, owner, appID uuid.UUID, req *AppUpdateDesktopBrandingReq) (*AppDesktopBranding, error)
 }
 
 // AppBuildQuotaService is the user-center side of packaging: it decides
@@ -40,12 +57,28 @@ type AppBuildQuotaService interface {
 	ListBuilds(ctx context.Context, uid, appID uuid.UUID) ([]*AppBuildJob, error)
 	// GetBuild returns one job.
 	GetBuild(ctx context.Context, uid, id uuid.UUID) (*AppBuildJob, error)
-	// DownloadBuild resolves one job's artifact path.
-	DownloadBuild(ctx context.Context, uid, id uuid.UUID) (AppBuildArtifact, error)
-	// PublishBuild promotes one succeeded job to the update channel.
-	PublishBuild(ctx context.Context, uid, id uuid.UUID) (*AppBuildRelease, error)
+	// DownloadBuild resolves one job's artifact for one channel.
+	DownloadBuild(ctx context.Context, uid, id uuid.UUID, channel string) (AppBuildArtifact, error)
+	// PublishBuild promotes one succeeded job's channel to the update channel.
+	PublishBuild(ctx context.Context, uid, id uuid.UUID, channel string) (*AppBuildRelease, error)
 	// DeleteBuild removes one job.
 	DeleteBuild(ctx context.Context, uid, id uuid.UUID) error
+	// UploadIcon stores one app's custom icon.
+	UploadIcon(ctx context.Context, uid, appID uuid.UUID, data []byte) error
+	// ClearIcon removes one app's custom icon.
+	ClearIcon(ctx context.Context, uid, appID uuid.UUID) error
+	// DownloadIcon resolves one app's custom icon for preview.
+	DownloadIcon(ctx context.Context, uid, appID uuid.UUID) (AppBuildArtifact, error)
+	// Platforms lists every build target of one app with the reason each is or
+	// is not buildable.
+	Platforms(ctx context.Context, uid, appID uuid.UUID, desktopLicensed bool) ([]AppBuildPlatform, error)
+	// GetDesktopBranding returns one app's desktop identity.
+	GetDesktopBranding(ctx context.Context, uid, appID uuid.UUID) (*AppDesktopBranding, error)
+	// SaveDesktopBranding stores one app's desktop identity.
+	SaveDesktopBranding(ctx context.Context, uid, appID uuid.UUID, req *AppUpdateDesktopBrandingReq) (*AppDesktopBranding, error)
+	// ListAppBuilds returns every build of one app with its owning app, so an
+	// admin sees all tenants' history without an owner check.
+	ListAppBuilds(ctx context.Context, appID uuid.UUID) ([]*AppBuildRecord, error)
 }
 
 // AppBuildInput is the user center's request to start a packaging job.
@@ -55,6 +88,10 @@ type AppBuildInput struct {
 	Platform    string
 	Version     string
 	VersionCode int
+	// SourceSnapshotID and SourceTaskID are the app's binding at enqueue time;
+	// nil builds the template source.
+	SourceSnapshotID *uuid.UUID
+	SourceTaskID     *uuid.UUID
 }
 
 // EnqueueAppBuildReq starts a packaging job for one app.
@@ -83,6 +120,45 @@ type AppBuildJob struct {
 	StartedAt           *time.Time `json:"started_at,omitempty"`
 	FinishedAt          *time.Time `json:"finished_at,omitempty"`
 	ArtifactDownloadURL string     `json:"artifact_download_url,omitempty"`
+	// Artifacts lists every channel of a succeeded job so the caller can offer
+	// one download and one publish action per package.
+	Artifacts        []AppBuildArtifactInfo `json:"artifacts,omitempty"`
+	SourceSnapshotID *uuid.UUID             `json:"source_snapshot_id,omitempty"`
+	SourceTaskID     *uuid.UUID             `json:"source_task_id,omitempty"`
+	SourceTaskTitle  string                 `json:"source_task_title,omitempty"`
+}
+
+// AppBuildArtifactInfo is one channel of a build job, projected for the API.
+type AppBuildArtifactInfo struct {
+	Channel     string `json:"channel"`
+	FileName    string `json:"file_name"`
+	Size        int64  `json:"size"`
+	SHA256      string `json:"sha256"`
+	DownloadURL string `json:"download_url"`
+	Publishable bool   `json:"publishable"`
+}
+
+// AppBuildPlatform describes one build target of one app.
+type AppBuildPlatform struct {
+	Platform string `json:"platform"`
+	Enabled  bool   `json:"enabled"`
+	Reason   string `json:"reason,omitempty"`
+	// UpdaterEndpoint is the URL the desktop client of this app polls. It is
+	// derived from the app id, so each app owns its update source.
+	UpdaterEndpoint string `json:"updater_endpoint,omitempty"`
+}
+
+// AppDesktopBranding is the per-app identity of the desktop shell.
+type AppDesktopBranding struct {
+	ProductName      string `json:"product_name"`
+	BundleIdentifier string `json:"bundle_identifier"`
+}
+
+// AppUpdateDesktopBrandingReq carries the editable per-app desktop branding
+// fields. Nil means unchanged.
+type AppUpdateDesktopBrandingReq struct {
+	ProductName      *string `json:"product_name,omitempty"`
+	BundleIdentifier *string `json:"bundle_identifier,omitempty"`
 }
 
 // AppBuildArtifact is the resolved artifact of one build job.
@@ -99,4 +175,15 @@ type AppBuildRelease struct {
 	URL            string `json:"url"`
 	ArtifactURL    string `json:"artifact_url,omitempty"`
 	ArtifactSHA256 string `json:"artifact_sha256,omitempty"`
+}
+
+// AppBuildRecord is one row of the admin build listing: a job together with the
+// app it built, so a listing does not need a second request for app names.
+type AppBuildRecord struct {
+	Job *AppBuildJob `json:"job"`
+	// AppName and PackageID come from the owning app row; both are empty when
+	// the app was removed after the job was enqueued.
+	AppName   string    `json:"app_name,omitempty"`
+	PackageID string    `json:"package_id,omitempty"`
+	OwnerID   uuid.UUID `json:"owner_id"`
 }

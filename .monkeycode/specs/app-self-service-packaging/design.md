@@ -230,8 +230,12 @@ func (u *appUsecase) canBuild(ctx context.Context, uid uuid.UUID, app *db.App) e
    job 状态更新与计数更新同涨同跌。实际取舍是「计数失败则整笔回滚」，
    任务留在 `queued`/`running` 而非 `succeeded`——宁可让用户看到任务没结束，
    也不出现「计数没记但任务显示成功」。
-10. **R6 的品牌与素材来源未实现（本特性最大的缺口，见下文专节）**：
-    `apps.icon_key` 字段全程无读写方，用户能设的图标对构建产物完全无影响。
+10. **R6 的素材注入按单槽收敛，七槽中的六槽仍是全局品牌**：
+    `apps.icon_key` 现已闭环（上传、预览、构建注入、清除，见下文专节），
+    但只驱动 `assets/icon.png` 一个落点。`icon-dark`、`adaptive-icon`、
+    `splash`、`splash-dark`、`logo-light`、`logo-dark` 仍取管理员配置，
+    用户端无入口设置。这是范围取舍而非遗漏——R6 只要求产物带自身标识，
+    单槽已满足；补足其余六槽需存储与 UI 同时改成槽位维度。
 11. R7 AC5 的「素材互相覆盖」原真实存在，现已修正：`workspaceFor`
     用 `cp -al` 给每个用户任务复制模板工作区，硬链接共享 inode，而
     runner 原先用 `os.WriteFile` 原地截断写 `app.json`、`assets/*.png`、
@@ -243,13 +247,20 @@ func (u *appUsecase) canBuild(ctx context.Context, uid uuid.UUID, app *db.App) e
     已新增 `atomicWriteFile`（同目录临时文件 + `os.Rename`），rename 替换
     目录项、不动 inode，四处写盘全部改走它。模板从此不被改写，
     且构建中断也不会留下半个 `app.json`。
-12. admin 任务产物不持久，属已知限制：admin 沿用模板工作区（R7 AC1 要求），
-    APK 落在模板内的 `android/app/build/outputs/apk/release/app-release.apk`，
-    `worker.go:191` 的产物迁出只在 `isolated` 为真时执行，所以 admin 任务
-    的 `artifact_path` 指向模板内部。下一次构建会覆盖或删除该文件，
-    而 `appbuilder.go:514` 的下载只做 `os.Stat` 存在性校验、不校验内容，
-    于是旧任务的下载链接可能返回新构建的 APK。要彻底解决需给 admin
-    单独落产物目录，与 AC1「沿用现有工作区」冲突，本特性未改。
+12. admin 任务产物原先不持久，现已修正。旧实现里 admin 复用模板工作区
+    （`isolated` 只在与 App 关联时为真），APK 落在模板内的
+    `android/app/build/outputs/apk/release/app-release.apk`，而产物迁出只在
+    `isolated` 为真时执行，于是 admin 任务的 `artifact_path` 指向模板内部，
+    下一次构建会覆盖该文件；`appbuilder.go` 的下载只做 `os.Stat` 存在性校验、
+    不校验内容，旧任务下载链接可能返回新构建的 APK。
+    重读 R7 后确认这不是 AC1 与 AC5 的冲突：**AC5 原文是「为每次任务使用
+    独立的工作区副本」，`每次任务` 包含 admin 任务**，AC1 的「沿用现有工作区」
+    指沿用实例配置的那个工作区作为**来源**（对照用户端按 App 各有一份），
+    并不要求 admin 直接在来源上原地构建。因此已让所有任务都取副本，
+    APK 统一迁出到 `artifacts/<jobID>/authyide.apk`：模板不再被覆盖，
+    每个任务的产物独立且持久，下载链接不会串。改动同时消除了 AC5 的
+    争用场景——worker 单协程串行（AC4）只是消除了并发写，AC5 要求的是
+    目录级隔离。
 13. R1 AC3 的冲突业务码原不返回，现已修正：`(user_id, package_id)` 的
     部分唯一索引 `idx_apps_user_package_id`（`WHERE deleted_at IS NULL`，
     000026 迁移）本身存在，重复创建会失败，但 usecase 把所有错误统一包成
@@ -264,8 +275,9 @@ func (u *appUsecase) canBuild(ctx context.Context, uid uuid.UUID, app *db.App) e
     任何将来直连 repo 的调用方会绕过归属校验。本特性未改。
 15. R8 AC1/AC2/AC5/AC7 前端原只实现一半，已补齐：
     AC1 缺平台支持矩阵与素材槽位——矩阵已加（渲染 `enabled_platforms`
-    徽标，此前面板把 `platform: "android"` 写死在提交体里）；素材槽位仍缺，
-    与 R6 同源。AC2 只读 `app.build_count` 当「已用次数」展示，
+    徽标，此前面板把 `platform: "android"` 写死在提交体里）；素材槽位
+    按单槽收敛：图标槽落在编辑页 `app-editor.tsx`（见品牌与素材注入），
+    构建面板不渲染槽位列表，其余六槽无入口，与 R6 同源的范围取舍。AC2 只读 `app.build_count` 当「已用次数」展示，
     既没有档位也没有剩余次数；已加档位卡片与剩余次数卡片
     （免费档 `max(0, 1 - build_count)`，其余档位显示不限）。
     AC5 只刷新了构建历史——`build_count` 由父页面传入，入队后只调
@@ -335,49 +347,62 @@ worker 沿用单协程串行执行，不加并发。多用户下排队等待变�
   `cfg.MobileBuild.QueueDepth` 条，默认 `20`；超出深度的任务直接置为 `failed`
   并写入「队列已满」，入队方返回 `ErrBuildQueueFull`（11425）。
 
-### 品牌与素材注入（未实现，需后续补齐）
+### 品牌与素材注入
 
 R6 的 User Story 是「我构建产物携带自己的品牌，所以我分发的应用带我的标识」。
-目前只有身份类字段生效，视觉素材完全没接上。
+身份类字段与单槽 App 图标均已生效；其余六个素材槽沿用实例级品牌。
 
-**已生效**：`worker.runnerConfig`（`worker/worker.go:259`）把 App 的
+**身份类字段**：`worker.runnerConfig`（`worker/worker.go`）把 App 的
 `name`、`package_id`、`ad_network`、`ad_app_id` 写入 `runner.Config`，
 `runner.rewriteConfig` 落进 `app.json` 的 `expo.name`/`expo.slug`/
 `expo.android.package`/`expo.extra.adNetwork`/`expo.extra.adAppID`；
 版本号与 versionCode 取自任务行的 `target_version`/`version_code`。
 R6 AC2 成立：App 名称覆盖实例级 `branding.name`，缺失时用实例值。
 
-**未生效**：`apps.icon_key` 是一个孤立字段，双向都不通。
+**App 图标**：`apps.icon_key` 现在是闭环字段。
 
-- 无写方：前端 `src/` 全量搜索 `iconKey` 零命中，`app-editor.tsx`
-  （209 行）不含图标上传或素材槽位 UI。字段虽可由
-  `UpdateAppReq.IconKey`（`domain/app.go:123`）经
-  `biz/app/repo/app.go:71` 写入，但用户端没有任何入口会调它。
-- 无读方：`GetAppBranding`（`repo/appbuildjob.go`）查的是完整 App 行、
-  字段里就有 `IconKey`，但构造 `domain.AppBranding` 时直接丢弃，
-  结构体本身也没有这个字段。构建链路因此完全看不见它。
+- 存储：`assetstore.AppStore`（`biz/mobilebuild/assetstore/appstore.go`）按
+  App 主键命名，落盘路径 `<MobileBuild.AssetRoot>/apps/<appID>.png`，与全局
+  素材库分目录，互不干扰。四个方法（`Put`/`Read`/`Path`/`Delete`）都在
+  入口拒绝零值 AppID，避免误写根文件。
+- 写入：`POST /api/v1/users/apps/:id/icon`（multipart，仅 PNG）。校验顺序固定为
+  归属校验 → 体积上限（`MobileBuild.MaxAssetBytes`，默认 4 MiB）→ PNG 魔数 →
+  `Put` → `SetAppIconKey(ctx, appID, appID.String())`。即
+  `icon_key` 取 App 主键本身作存在性标记，不承担寻址职责，寻址由
+  `AppStore` 的命名规则完成。
+- 读取：构建期 `worker.runnerConfig` 把 `app.IconKey` 传入
+  `runner.Config.IconKey`，`runner.injectAppIcon` 在 `IconKey` 非空时从
+  `AppStore` 读出并原子写入工作区 `assets/icon.png`。
+- 展示：`GET /api/v1/users/apps/:id/icon` 直接流式返回 PNG
+  （`Content-Disposition: inline`），供编辑器预览；不落中间副本。
+- 清除：`DELETE` 同一路径，清空 `icon_key` 并从存储删除文件。
+- 归属：`appUsecase` 先按 `repo.Get` 做归属校验，`mobilebuild` usecase 再用
+  `verifyOwnership` 复核一遍。跨用户请求表现为「App 不存在」，不泄露他人 App 的存在性。
 
-**素材来源是全局单套**：`runner.injectAssets`（`runner/runner.go:244`）
-遍历固定的 `domain.AssetSlots` 七槽（`logo-light`/`logo-dark`/`icon`/
-`icon-dark`/`adaptive-icon`/`splash`/`splash-dark`），从
-`assetstore.Store` 按槽名读取并写进工作区 `assets/<slot>.png`。
-槽名不含 App 维度，素材库也没有按 App 命名的命名空间，所以每个用户的
-APK 拿到的是同一套管理员配置的品牌素材，差异只在名称、包标识、广告配置与版本号。
+R6 AC3 的回落链由此成立：App 未设图标时 `IconKey` 为空串，`injectAppIcon`
+直接跳过存储读取，模板工作区自带的内置图标保留；App 已设图标但该文件缺失时
+`AppStore.Read` 返回 `ErrEmpty`，`injectAssets` 跳过该槽，同样是内置图标兜底。
+
+**刻意收窄的范围**：只覆盖 `icon` 单槽。`icon-dark`、`adaptive-icon`、
+`splash`、`splash-dark`、`logo-light`、`logo-dark` 仍是全局槽，各用户的
+APK 在这六项上拿到同一套管理员素材。R6 的 User Story 只要求产物带
+「我的标识」，单槽已满足；补齐七槽需把存储与 UI 都改成槽位维度，
+属独立后续需求。
 
 R6 各条对照：
 
 | 条款 | 状态 |
 | --- | --- |
-| AC1 读 App 的图标键与包标识 | 包标识成立；图标键无读方 |
+| AC1 读 App 的图标键与包标识 | 成立，`IconKey` 经 `runner.Config` 进入构建 |
 | AC2 实例品牌作默认值、App 版本字段覆盖 | 成立 |
-| AC3 无图标键则用实例素材、再回落内置默认 | 未实现，无 App 维度选择，无回落链 |
-| AC4 素材读取失败则置 failed 并写错误 | 对所读的全局槽成立：`Read` 报错即中止构建并记错误；`ErrEmpty` 跳过该槽，工作区模板内的内置文件保留 |
+| AC3 无图标键则用实例素材、再回落内置默认 | 成立，见上文回落链 |
+| AC4 素材读取失败则置 failed 并写错误 | 成立：`Read` 返回真错误即中止构建并记错误，`ErrEmpty` 跳过该槽 |
 
-补齐需要的设计决策：素材库引入 App 维度命名空间（如 `apps/<appID>/<slot>`），
-或在 `assetstore` 之外为 App 建对象存储 key 映射；然后
-`domain.AppBranding` 补字段、`GetAppBranding` 映射、`runner.Config` 传参、
-`injectAssets` 改按 App 取值并做回落。约五个文件联动，且必须带编译与部署验证，
-本轮因内存不足无法本地编译、SSH 不通无法部署，故只记录不改代码。
+**前端**：`app-editor.tsx` 增加图标字段——预览框 + 选择文件 + 移除，
+`app.locked` 时整块禁用。预览用 `URL.createObjectURL` 持有 blob，
+在替换、切 App、卸载三种时机统一 `revokeObjectURL`。`Api.ts` 按现有惯例
+手工注入三个方法，`v1UsersAppsIconDownload` 返回原始响应以便取 blob。
+i18n 在 `consoleApps.editor.icon*` 下新增 11 个叶子键，en/cn 同步。
 
 ### 用户端页面
 
@@ -394,8 +419,8 @@ R6 各条对照：
   tooltip（需求 R8 AC6）；下载走 `v1UsersAppsBuildsDownload` 拿 blob 后
   `URL.createObjectURL` + `<a download>`。
 - `frontend/src/api/Api.ts`：按现有惯例手工注入 6 个 build 方法与
-  `DomainAppBuildJob` / `DomainAppBuildRelease` 类型，`DomainListAppsResp`
-  补 `tier` / `host_quota`。
+  3 个图标方法（见上节），以及 `DomainAppBuildJob` / `DomainAppBuildRelease`
+  类型；`DomainListAppsResp` 补 `tier` / `host_quota`。
 
 i18n 在 `src/i18n/resources/{cn,en}.ts` 的 `consoleApps.tabs.build` 与
 `consoleApps.builds.*` 下各约 30 个叶子键；`test/i18n-resources-completeness.test.ts`
@@ -599,14 +624,49 @@ down 文件与 up 文件逐条对应（先删 FK、再删两个索引、最后�
 与线上核实的一致；ent schema 声明了同列名的两个索引但没有 FK 注解，
 所以 ent 迁移器不会与 SQL 迁移产生第二个 FK。
 
-编译验证未能完成：本机磁盘 0 字节可用、可用内存不足 1GiB，
-`go build` 的构建缓存改放 `/dev/shm` 后仍被 OOM killer 终止在
-`backend/db`（ent 生成的巨型包）上，属于环境 OOM 而非编译错误，
-且终止点在待改文件之前。已用 gofmt 校验语法（exit 0），并逐个到生成代码里
-核实了引用的标识符：`AppUpdate.SetLocked(bool)`（`db/app_update.go:191`）、
-`db.Entitlement.Tier`（`db/entitlement.go:25`）、`consts.PlanTier` 与
-`consts.PlanTierFree`（`consts/plan.go:4,7`）、`domain.BuildStatusSucceeded`
-（`domain/appbuilder.go:16`）。
+编译验证完成，四处的改动全部真实编译通过。本机磁盘 0 字节可用，
+默认并行编译会让多个 ent 生成的巨型包同时占内存而 OOM；**用 `-p=1` 串行
+编译即可绕开**，`go build -p=1 ./db`（ent 生成的 2MB 巨型包）14 秒完成。
+
+- `go build -p=1 ./biz/mobilebuild/runner/` — 通过，覆盖 `atomicWriteFile`
+- `go build -p=1 ./biz/mobilebuild/usecase/` — 通过，覆盖桌面平台门禁
+- `go build -p=1 ./biz/mobilebuild/repo/` — 通过，覆盖 `CompleteForApp` 的
+  状态守卫与免费档锁定
+- `go build -p=1 ./biz/app/usecase/` — 通过，覆盖 `IsConstraintError` 到
+  11402 的映射
+- `go vet -p=1` 覆盖 `runner` 与 `usecase` 两个包，零告警
+- 另逐个到生成代码里核实了引用的标识符：`AppUpdate.SetLocked(bool)`
+  （`db/app_update.go:191`）、`db.Entitlement.Tier` 是 `string`
+  （`db/entitlement.go:25`，转 string-based 的 `consts.PlanTier` 合法）、
+  `consts.PlanTier` 与 `consts.PlanTierFree`（`consts/plan.go:4,7`）、
+  `domain.BuildStatusSucceeded`（`domain/appbuilder.go:16`）、
+  `func db.IsConstraintError(err error) bool`（`db/ent.go:395`）。
+- `go build -p=1 -o /tmp/opencode/server-verify ./cmd/server` 全部包
+  编译与代码生成通过，**只有最后一步链接失败**：
+  `link: mapping output file failed: no space left on device`。
+  产物改写到 `/dev/shm` 仍然报同样的错，因为 Go 链接器还会往
+  `GOTMPDIR`/`TMPDIR` 写临时映射文件，那两个默认落在满盘的 `/tmp`。
+- 把 `GOTMPDIR` 与 `TMPDIR` 都指向 `/dev/shm` 后 `go build -p=1` 成功，
+  产出 147842735 字节的 ELF x86-64 可执行文件
+  （BuildID `ca7cd125…`，`file` 校验为有效 ELF），用时 272 秒。
+  这一步把 DI 装配、路由注册和全部包的链接都跑完了。
+
+`atomicWriteFile` 补了三条回归测试（`biz/mobilebuild/runner/runner_test.go`），
+`go test` 全绿：
+
+- `TestAtomicWriteFileKeepsHardLinkedTemplateUntouched` — 用 `os.Link` 建立
+  硬链接，原子写目标后断言模板内容仍是旧值。`os.WriteFile` 的原地截断会让
+  硬链接跟着变，只有 `os.Rename` 替换目录项才能让模板保住旧内容，
+  这条测试直接钉住 R7 AC5 的跨租户泄漏根因。
+- `TestAtomicWriteFileLeavesNoTempFiles` — 断言同目录内没有残留 `tmp_*`。
+- `TestAtomicWriteFilePreservesOriginalOnFailure` — 目标目录不存在时写失败，
+  断言目录里没有任何遗留文件。
+
+另确认了计数链的全部调用点：`execute` 成功路径在 `worker.go:201` 构造
+`BuildStatusSucceeded`，所有失败分支都经 `fail()`（`worker.go:245`）构造
+`BuildStatusFailed`，两者汇合到 `complete()`（`worker.go:238`）。
+`complete` 里对 `app == nil` 有显式短路走 `FinishJob`，所以 admin 路径不会
+触碰计数，也不会因 `app.ID` 解引用而 panic。
 
 前端验证：
 

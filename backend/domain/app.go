@@ -15,6 +15,8 @@ type AppUsecase interface {
 	Get(ctx context.Context, uid uuid.UUID, id uuid.UUID) (*App, error)
 	Create(ctx context.Context, uid uuid.UUID, req *CreateAppReq) (*App, error)
 	Update(ctx context.Context, uid uuid.UUID, id uuid.UUID, req *UpdateAppReq) (*App, error)
+	// SetSource 单独换绑会话源码快照，nil 表示解绑回模板源码。
+	SetSource(ctx context.Context, uid uuid.UUID, id uuid.UUID, req *SetSourceAppReq) (*App, error)
 	Delete(ctx context.Context, uid uuid.UUID, id uuid.UUID) error
 	// AdNetworks returns the ad network options defined in packer/ad_networks.yaml.
 	AdNetworks(ctx context.Context) ([]AdNetworkOption, error)
@@ -32,6 +34,8 @@ type AppQuotaService interface {
 type AppRepo interface {
 	List(ctx context.Context, uid uuid.UUID) ([]*db.App, error)
 	Get(ctx context.Context, uid, id uuid.UUID) (*db.App, error)
+	// GetByID resolves one app without an owner check, for the admin views.
+	GetByID(ctx context.Context, id uuid.UUID) (*db.App, error)
 	Create(ctx context.Context, uid uuid.UUID, req *CreateAppReq) (*db.App, error)
 	Update(ctx context.Context, uid, id uuid.UUID, req *UpdateAppReq) (*db.App, error)
 	Delete(ctx context.Context, uid, id uuid.UUID) error
@@ -54,9 +58,11 @@ type App struct {
 	LastBuiltAt          *time.Time `json:"last_built_at,omitempty"`
 	LastBuildPlatform    string     `json:"last_build_platform,omitempty"`
 	LastBuildArtifactKey string     `json:"last_build_artifact_key,omitempty"`
-	Tier                 string     `json:"tier"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
+	// SourceSnapshotID 指向绑定的会话源码快照；nil 表示模板源码模式。
+	SourceSnapshotID *uuid.UUID `json:"source_snapshot_id,omitempty"`
+	Tier             string     `json:"tier"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // AdNetworkOption 广告网络选项，来自 packer/ad_networks.yaml。
@@ -86,6 +92,7 @@ func (a *App) From(src *db.App) *App {
 	a.LastBuiltAt = src.LastBuiltAt
 	a.LastBuildPlatform = src.LastBuildPlatform
 	a.LastBuildArtifactKey = src.LastBuildArtifactKey
+	a.SourceSnapshotID = src.SourceSnapshotID
 	a.CreatedAt = src.CreatedAt
 	a.UpdatedAt = src.UpdatedAt
 	return a
@@ -107,12 +114,15 @@ type ListAppsResp struct {
 
 // CreateAppReq 创建 App 请求
 type CreateAppReq struct {
-	Name             string   `json:"name" validate:"required"`
-	PackageID        string   `json:"package_id" validate:"required"`
-	Description      string   `json:"description,omitempty"`
-	AdNetwork        string   `json:"ad_network,omitempty"`
-	AdAppID          string   `json:"ad_app_id,omitempty"`
+	Name        string `json:"name" validate:"required"`
+	PackageID   string `json:"package_id" validate:"required"`
+	Description string `json:"description,omitempty"`
+	AdNetwork   string `json:"ad_network,omitempty"`
+	AdAppID     string `json:"ad_app_id,omitempty"`
+	// EnabledPlatforms 省略即不改。
 	EnabledPlatforms []string `json:"enabled_platforms,omitempty"`
+	// SourceSnapshotID 指向绑定的会话源码快照；nil 表示模板源码模式。
+	SourceSnapshotID *uuid.UUID `json:"source_snapshot_id,omitempty"`
 }
 
 // UpdateAppReq 更新 App 请求
@@ -124,6 +134,14 @@ type UpdateAppReq struct {
 	AdNetwork        *string   `json:"ad_network,omitempty"`
 	AdAppID          *string   `json:"ad_app_id,omitempty"`
 	EnabledPlatforms []string  `json:"enabled_platforms,omitempty"`
+	// SourceSnapshotID 省略即不改；显式 nil 表示解绑回模板源码。
+	SourceSnapshotID **uuid.UUID `json:"source_snapshot_id,omitempty"`
+}
+
+// SetSourceAppReq 绑定或解绑 App 的会话源码快照。SourceSnapshotID 为 nil 表示
+// 解绑回模板源码。与 Update 分开，让「只换源码来源」不必顺带提交其他字段。
+type SetSourceAppReq struct {
+	SourceSnapshotID *uuid.UUID `json:"source_snapshot_id"`
 }
 
 // DeleteAppReq 删除 App 请求

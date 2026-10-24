@@ -387,6 +387,7 @@ var (
 		{Name: "name", Type: field.TypeString},
 		{Name: "package_id", Type: field.TypeString},
 		{Name: "icon_key", Type: field.TypeString, Nullable: true},
+		{Name: "source_snapshot_id", Type: field.TypeUUID, Nullable: true},
 		{Name: "ad_network", Type: field.TypeString, Default: "none"},
 		{Name: "ad_app_id", Type: field.TypeString, Nullable: true},
 		{Name: "enabled_platforms", Type: field.TypeJSON, Nullable: true},
@@ -409,7 +410,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "apps_users_apps",
-				Columns:    []*schema.Column{AppsColumns[17]},
+				Columns:    []*schema.Column{AppsColumns[18]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -418,12 +419,12 @@ var (
 			{
 				Name:    "app_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{AppsColumns[17]},
+				Columns: []*schema.Column{AppsColumns[18]},
 			},
 			{
 				Name:    "app_user_id_package_id",
 				Unique:  true,
-				Columns: []*schema.Column{AppsColumns[17], AppsColumns[3]},
+				Columns: []*schema.Column{AppsColumns[18], AppsColumns[3]},
 			},
 		},
 	}
@@ -463,12 +464,49 @@ var (
 			},
 		},
 	}
+	// AppBuildArtifactsColumns holds the columns for the "app_build_artifacts" table.
+	AppBuildArtifactsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeUUID},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true},
+		{Name: "job_id", Type: field.TypeUUID},
+		{Name: "platform", Type: field.TypeString},
+		{Name: "channel", Type: field.TypeString},
+		{Name: "file_name", Type: field.TypeString, Size: 2147483647},
+		{Name: "artifact_path", Type: field.TypeString, Size: 2147483647},
+		{Name: "artifact_sha256", Type: field.TypeString, Size: 2147483647},
+		{Name: "artifact_size", Type: field.TypeInt64, Default: 0},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// AppBuildArtifactsTable holds the schema information for the "app_build_artifacts" table.
+	AppBuildArtifactsTable = &schema.Table{
+		Name:       "app_build_artifacts",
+		Columns:    AppBuildArtifactsColumns,
+		PrimaryKey: []*schema.Column{AppBuildArtifactsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "appbuildartifact_job_id_channel",
+				Unique:  true,
+				Columns: []*schema.Column{AppBuildArtifactsColumns[2], AppBuildArtifactsColumns[4]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "deleted_at IS NULL",
+				},
+			},
+			{
+				Name:    "appbuildartifact_platform_channel",
+				Unique:  false,
+				Columns: []*schema.Column{AppBuildArtifactsColumns[3], AppBuildArtifactsColumns[4]},
+			},
+		},
+	}
 	// AppBuildJobsColumns holds the columns for the "app_build_jobs" table.
 	AppBuildJobsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeUUID},
 		{Name: "deleted_at", Type: field.TypeTime, Nullable: true},
 		{Name: "user_id", Type: field.TypeUUID},
 		{Name: "app_id", Type: field.TypeUUID, Nullable: true},
+		{Name: "source_snapshot_id", Type: field.TypeUUID, Nullable: true},
+		{Name: "source_task_id", Type: field.TypeUUID, Nullable: true},
 		{Name: "platform", Type: field.TypeString},
 		{Name: "target_version", Type: field.TypeString},
 		{Name: "version_code", Type: field.TypeInt, Default: 1},
@@ -499,7 +537,7 @@ var (
 			{
 				Name:    "appbuildjob_status_enqueued_at",
 				Unique:  false,
-				Columns: []*schema.Column{AppBuildJobsColumns[7], AppBuildJobsColumns[19]},
+				Columns: []*schema.Column{AppBuildJobsColumns[9], AppBuildJobsColumns[21]},
 			},
 			{
 				Name:    "appbuildjob_user_id",
@@ -509,22 +547,87 @@ var (
 			{
 				Name:    "appbuildjob_app_id_status",
 				Unique:  false,
-				Columns: []*schema.Column{AppBuildJobsColumns[3], AppBuildJobsColumns[7]},
+				Columns: []*schema.Column{AppBuildJobsColumns[3], AppBuildJobsColumns[9]},
 			},
 			{
 				Name:    "appbuildjob_user_id_enqueued_at",
 				Unique:  false,
-				Columns: []*schema.Column{AppBuildJobsColumns[2], AppBuildJobsColumns[19]},
+				Columns: []*schema.Column{AppBuildJobsColumns[2], AppBuildJobsColumns[21]},
 			},
 			{
 				Name:    "appbuildjob_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{AppBuildJobsColumns[22]},
+				Columns: []*schema.Column{AppBuildJobsColumns[24]},
 			},
 			{
 				Name:    "appbuildjob_platform",
 				Unique:  false,
-				Columns: []*schema.Column{AppBuildJobsColumns[4]},
+				Columns: []*schema.Column{AppBuildJobsColumns[6]},
+			},
+		},
+	}
+	// AppDesktopBrandingColumns holds the columns for the "app_desktop_branding" table.
+	AppDesktopBrandingColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeUUID},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true},
+		{Name: "app_id", Type: field.TypeUUID},
+		{Name: "product_name", Type: field.TypeString, Default: ""},
+		{Name: "bundle_identifier", Type: field.TypeString, Default: ""},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// AppDesktopBrandingTable holds the schema information for the "app_desktop_branding" table.
+	AppDesktopBrandingTable = &schema.Table{
+		Name:       "app_desktop_branding",
+		Columns:    AppDesktopBrandingColumns,
+		PrimaryKey: []*schema.Column{AppDesktopBrandingColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "appdesktopbranding_app_id",
+				Unique:  true,
+				Columns: []*schema.Column{AppDesktopBrandingColumns[2]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "deleted_at IS NULL",
+				},
+			},
+		},
+	}
+	// AppSourceSnapshotsColumns holds the columns for the "app_source_snapshots" table.
+	AppSourceSnapshotsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeUUID},
+		{Name: "user_id", Type: field.TypeUUID},
+		{Name: "task_id", Type: field.TypeUUID},
+		{Name: "object_key", Type: field.TypeString},
+		{Name: "sha256", Type: field.TypeString},
+		{Name: "size_bytes", Type: field.TypeInt64},
+		{Name: "file_count", Type: field.TypeInt},
+		{Name: "status", Type: field.TypeString, Default: "uploading"},
+		{Name: "superseded", Type: field.TypeBool, Default: false},
+		{Name: "error", Type: field.TypeString, Nullable: true, Size: 2147483647},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "completed_at", Type: field.TypeTime, Nullable: true},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// AppSourceSnapshotsTable holds the schema information for the "app_source_snapshots" table.
+	AppSourceSnapshotsTable = &schema.Table{
+		Name:       "app_source_snapshots",
+		Columns:    AppSourceSnapshotsColumns,
+		PrimaryKey: []*schema.Column{AppSourceSnapshotsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "appsourcesnapshot_user_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{AppSourceSnapshotsColumns[1], AppSourceSnapshotsColumns[10]},
+			},
+			{
+				Name:    "appsourcesnapshot_task_id",
+				Unique:  false,
+				Columns: []*schema.Column{AppSourceSnapshotsColumns[2]},
+			},
+			{
+				Name:    "appsourcesnapshot_status",
+				Unique:  false,
+				Columns: []*schema.Column{AppSourceSnapshotsColumns[7]},
 			},
 		},
 	}
@@ -550,6 +653,34 @@ var (
 				Columns:    []*schema.Column{AuditsColumns[7]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
+			},
+		},
+	}
+	// DesktopBrandingColumns holds the columns for the "desktop_branding" table.
+	DesktopBrandingColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeUUID},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true},
+		{Name: "singleton_key", Type: field.TypeString, Default: "authyide"},
+		{Name: "product_name", Type: field.TypeString, Default: ""},
+		{Name: "bundle_identifier", Type: field.TypeString, Default: ""},
+		{Name: "updater_endpoint", Type: field.TypeString, Default: ""},
+		{Name: "icon_key", Type: field.TypeString, Default: ""},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// DesktopBrandingTable holds the schema information for the "desktop_branding" table.
+	DesktopBrandingTable = &schema.Table{
+		Name:       "desktop_branding",
+		Columns:    DesktopBrandingColumns,
+		PrimaryKey: []*schema.Column{DesktopBrandingColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "desktopbranding_singleton_key",
+				Unique:  true,
+				Columns: []*schema.Column{DesktopBrandingColumns[2]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "deleted_at IS NULL",
+				},
 			},
 		},
 	}
@@ -2189,8 +2320,12 @@ var (
 		AgentSyncJobsTable,
 		AppsTable,
 		AppBrandingTable,
+		AppBuildArtifactsTable,
 		AppBuildJobsTable,
+		AppDesktopBrandingTable,
+		AppSourceSnapshotsTable,
 		AuditsTable,
+		DesktopBrandingTable,
 		EntitlementsTable,
 		GitBotsTable,
 		GitBotTasksTable,
@@ -2284,12 +2419,24 @@ func init() {
 	AppBrandingTable.Annotation = &entsql.Annotation{
 		Table: "app_branding",
 	}
+	AppBuildArtifactsTable.Annotation = &entsql.Annotation{
+		Table: "app_build_artifacts",
+	}
 	AppBuildJobsTable.Annotation = &entsql.Annotation{
 		Table: "app_build_jobs",
+	}
+	AppDesktopBrandingTable.Annotation = &entsql.Annotation{
+		Table: "app_desktop_branding",
+	}
+	AppSourceSnapshotsTable.Annotation = &entsql.Annotation{
+		Table: "app_source_snapshots",
 	}
 	AuditsTable.ForeignKeys[0].RefTable = UsersTable
 	AuditsTable.Annotation = &entsql.Annotation{
 		Table: "audits",
+	}
+	DesktopBrandingTable.Annotation = &entsql.Annotation{
+		Table: "desktop_branding",
 	}
 	EntitlementsTable.ForeignKeys[0].RefTable = UsersTable
 	EntitlementsTable.Annotation = &entsql.Annotation{

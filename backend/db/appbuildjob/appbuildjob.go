@@ -21,6 +21,10 @@ const (
 	FieldUserID = "user_id"
 	// FieldAppID holds the string denoting the app_id field in the database.
 	FieldAppID = "app_id"
+	// FieldSourceSnapshotID holds the string denoting the source_snapshot_id field in the database.
+	FieldSourceSnapshotID = "source_snapshot_id"
+	// FieldSourceTaskID holds the string denoting the source_task_id field in the database.
+	FieldSourceTaskID = "source_task_id"
 	// FieldPlatform holds the string denoting the platform field in the database.
 	FieldPlatform = "platform"
 	// FieldTargetVersion holds the string denoting the target_version field in the database.
@@ -71,6 +75,8 @@ var Columns = []string{
 	FieldDeletedAt,
 	FieldUserID,
 	FieldAppID,
+	FieldSourceSnapshotID,
+	FieldSourceTaskID,
 	FieldPlatform,
 	FieldTargetVersion,
 	FieldVersionCode,
@@ -156,6 +162,16 @@ func ByUserID(opts ...sql.OrderTermOption) OrderOption {
 // ByAppID orders the results by the app_id field.
 func ByAppID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldAppID, opts...).ToFunc()
+}
+
+// BySourceSnapshotID orders the results by the source_snapshot_id field.
+func BySourceSnapshotID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSourceSnapshotID, opts...).ToFunc()
+}
+
+// BySourceTaskID orders the results by the source_task_id field.
+func BySourceTaskID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSourceTaskID, opts...).ToFunc()
 }
 
 // ByPlatform orders the results by the platform field.

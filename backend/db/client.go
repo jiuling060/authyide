@@ -28,8 +28,12 @@ import (
 	"github.com/chaitin/MonkeyCode/backend/db/agentsyncjob"
 	"github.com/chaitin/MonkeyCode/backend/db/app"
 	"github.com/chaitin/MonkeyCode/backend/db/appbranding"
+	"github.com/chaitin/MonkeyCode/backend/db/appbuildartifact"
 	"github.com/chaitin/MonkeyCode/backend/db/appbuildjob"
+	"github.com/chaitin/MonkeyCode/backend/db/appdesktopbranding"
+	"github.com/chaitin/MonkeyCode/backend/db/appsourcesnapshot"
 	"github.com/chaitin/MonkeyCode/backend/db/audit"
+	"github.com/chaitin/MonkeyCode/backend/db/desktopbranding"
 	"github.com/chaitin/MonkeyCode/backend/db/entitlement"
 	"github.com/chaitin/MonkeyCode/backend/db/gitbot"
 	"github.com/chaitin/MonkeyCode/backend/db/gitbottask"
@@ -108,10 +112,18 @@ type Client struct {
 	App *AppClient
 	// AppBranding is the client for interacting with the AppBranding builders.
 	AppBranding *AppBrandingClient
+	// AppBuildArtifact is the client for interacting with the AppBuildArtifact builders.
+	AppBuildArtifact *AppBuildArtifactClient
 	// AppBuildJob is the client for interacting with the AppBuildJob builders.
 	AppBuildJob *AppBuildJobClient
+	// AppDesktopBranding is the client for interacting with the AppDesktopBranding builders.
+	AppDesktopBranding *AppDesktopBrandingClient
+	// AppSourceSnapshot is the client for interacting with the AppSourceSnapshot builders.
+	AppSourceSnapshot *AppSourceSnapshotClient
 	// Audit is the client for interacting with the Audit builders.
 	Audit *AuditClient
+	// DesktopBranding is the client for interacting with the DesktopBranding builders.
+	DesktopBranding *DesktopBrandingClient
 	// Entitlement is the client for interacting with the Entitlement builders.
 	Entitlement *EntitlementClient
 	// GitBot is the client for interacting with the GitBot builders.
@@ -225,8 +237,12 @@ func (c *Client) init() {
 	c.AgentSyncJob = NewAgentSyncJobClient(c.config)
 	c.App = NewAppClient(c.config)
 	c.AppBranding = NewAppBrandingClient(c.config)
+	c.AppBuildArtifact = NewAppBuildArtifactClient(c.config)
 	c.AppBuildJob = NewAppBuildJobClient(c.config)
+	c.AppDesktopBranding = NewAppDesktopBrandingClient(c.config)
+	c.AppSourceSnapshot = NewAppSourceSnapshotClient(c.config)
 	c.Audit = NewAuditClient(c.config)
+	c.DesktopBranding = NewDesktopBrandingClient(c.config)
 	c.Entitlement = NewEntitlementClient(c.config)
 	c.GitBot = NewGitBotClient(c.config)
 	c.GitBotTask = NewGitBotTaskClient(c.config)
@@ -376,8 +392,12 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		AgentSyncJob:                NewAgentSyncJobClient(cfg),
 		App:                         NewAppClient(cfg),
 		AppBranding:                 NewAppBrandingClient(cfg),
+		AppBuildArtifact:            NewAppBuildArtifactClient(cfg),
 		AppBuildJob:                 NewAppBuildJobClient(cfg),
+		AppDesktopBranding:          NewAppDesktopBrandingClient(cfg),
+		AppSourceSnapshot:           NewAppSourceSnapshotClient(cfg),
 		Audit:                       NewAuditClient(cfg),
+		DesktopBranding:             NewDesktopBrandingClient(cfg),
 		Entitlement:                 NewEntitlementClient(cfg),
 		GitBot:                      NewGitBotClient(cfg),
 		GitBotTask:                  NewGitBotTaskClient(cfg),
@@ -454,8 +474,12 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		AgentSyncJob:                NewAgentSyncJobClient(cfg),
 		App:                         NewAppClient(cfg),
 		AppBranding:                 NewAppBrandingClient(cfg),
+		AppBuildArtifact:            NewAppBuildArtifactClient(cfg),
 		AppBuildJob:                 NewAppBuildJobClient(cfg),
+		AppDesktopBranding:          NewAppDesktopBrandingClient(cfg),
+		AppSourceSnapshot:           NewAppSourceSnapshotClient(cfg),
 		Audit:                       NewAuditClient(cfg),
+		DesktopBranding:             NewDesktopBrandingClient(cfg),
 		Entitlement:                 NewEntitlementClient(cfg),
 		GitBot:                      NewGitBotClient(cfg),
 		GitBotTask:                  NewGitBotTaskClient(cfg),
@@ -532,17 +556,19 @@ func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
 		c.AgentPlugin, c.AgentPluginRepo, c.AgentPluginVersion, c.AgentRule,
 		c.AgentRuleVersion, c.AgentSkill, c.AgentSkillGroupBinding, c.AgentSkillRepo,
-		c.AgentSkillVersion, c.AgentSyncJob, c.App, c.AppBranding, c.AppBuildJob,
-		c.Audit, c.Entitlement, c.GitBot, c.GitBotTask, c.GitBotUser, c.GitIdentity,
-		c.GitTask, c.Host, c.Image, c.MCPTool, c.MCPToolCall, c.MCPUpstream,
-		c.MCPUserToolSetting, c.Model, c.ModelApiKey, c.ModelPricing, c.NotifyChannel,
-		c.NotifySendLog, c.NotifySubscription, c.Project, c.ProjectCollaborator,
-		c.ProjectGitBot, c.ProjectIssue, c.ProjectIssueComment, c.ProjectTask, c.Task,
-		c.TaskModelSwitch, c.TaskUsageStat, c.TaskVirtualMachine, c.Team,
-		c.TeamExtensionImageArchive, c.TeamGroup, c.TeamGroupHost, c.TeamGroupImage,
-		c.TeamGroupMCPUpstream, c.TeamGroupMember, c.TeamGroupModel, c.TeamHost,
-		c.TeamImage, c.TeamMember, c.TeamModel, c.TeamOIDCConfig, c.User,
-		c.UserIdentity, c.VirtualMachine, c.VirtualMachineRecycleRecord,
+		c.AgentSkillVersion, c.AgentSyncJob, c.App, c.AppBranding, c.AppBuildArtifact,
+		c.AppBuildJob, c.AppDesktopBranding, c.AppSourceSnapshot, c.Audit,
+		c.DesktopBranding, c.Entitlement, c.GitBot, c.GitBotTask, c.GitBotUser,
+		c.GitIdentity, c.GitTask, c.Host, c.Image, c.MCPTool, c.MCPToolCall,
+		c.MCPUpstream, c.MCPUserToolSetting, c.Model, c.ModelApiKey, c.ModelPricing,
+		c.NotifyChannel, c.NotifySendLog, c.NotifySubscription, c.Project,
+		c.ProjectCollaborator, c.ProjectGitBot, c.ProjectIssue, c.ProjectIssueComment,
+		c.ProjectTask, c.Task, c.TaskModelSwitch, c.TaskUsageStat,
+		c.TaskVirtualMachine, c.Team, c.TeamExtensionImageArchive, c.TeamGroup,
+		c.TeamGroupHost, c.TeamGroupImage, c.TeamGroupMCPUpstream, c.TeamGroupMember,
+		c.TeamGroupModel, c.TeamHost, c.TeamImage, c.TeamMember, c.TeamModel,
+		c.TeamOIDCConfig, c.User, c.UserIdentity, c.VirtualMachine,
+		c.VirtualMachineRecycleRecord,
 	} {
 		n.Use(hooks...)
 	}
@@ -554,17 +580,19 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
 		c.AgentPlugin, c.AgentPluginRepo, c.AgentPluginVersion, c.AgentRule,
 		c.AgentRuleVersion, c.AgentSkill, c.AgentSkillGroupBinding, c.AgentSkillRepo,
-		c.AgentSkillVersion, c.AgentSyncJob, c.App, c.AppBranding, c.AppBuildJob,
-		c.Audit, c.Entitlement, c.GitBot, c.GitBotTask, c.GitBotUser, c.GitIdentity,
-		c.GitTask, c.Host, c.Image, c.MCPTool, c.MCPToolCall, c.MCPUpstream,
-		c.MCPUserToolSetting, c.Model, c.ModelApiKey, c.ModelPricing, c.NotifyChannel,
-		c.NotifySendLog, c.NotifySubscription, c.Project, c.ProjectCollaborator,
-		c.ProjectGitBot, c.ProjectIssue, c.ProjectIssueComment, c.ProjectTask, c.Task,
-		c.TaskModelSwitch, c.TaskUsageStat, c.TaskVirtualMachine, c.Team,
-		c.TeamExtensionImageArchive, c.TeamGroup, c.TeamGroupHost, c.TeamGroupImage,
-		c.TeamGroupMCPUpstream, c.TeamGroupMember, c.TeamGroupModel, c.TeamHost,
-		c.TeamImage, c.TeamMember, c.TeamModel, c.TeamOIDCConfig, c.User,
-		c.UserIdentity, c.VirtualMachine, c.VirtualMachineRecycleRecord,
+		c.AgentSkillVersion, c.AgentSyncJob, c.App, c.AppBranding, c.AppBuildArtifact,
+		c.AppBuildJob, c.AppDesktopBranding, c.AppSourceSnapshot, c.Audit,
+		c.DesktopBranding, c.Entitlement, c.GitBot, c.GitBotTask, c.GitBotUser,
+		c.GitIdentity, c.GitTask, c.Host, c.Image, c.MCPTool, c.MCPToolCall,
+		c.MCPUpstream, c.MCPUserToolSetting, c.Model, c.ModelApiKey, c.ModelPricing,
+		c.NotifyChannel, c.NotifySendLog, c.NotifySubscription, c.Project,
+		c.ProjectCollaborator, c.ProjectGitBot, c.ProjectIssue, c.ProjectIssueComment,
+		c.ProjectTask, c.Task, c.TaskModelSwitch, c.TaskUsageStat,
+		c.TaskVirtualMachine, c.Team, c.TeamExtensionImageArchive, c.TeamGroup,
+		c.TeamGroupHost, c.TeamGroupImage, c.TeamGroupMCPUpstream, c.TeamGroupMember,
+		c.TeamGroupModel, c.TeamHost, c.TeamImage, c.TeamMember, c.TeamModel,
+		c.TeamOIDCConfig, c.User, c.UserIdentity, c.VirtualMachine,
+		c.VirtualMachineRecycleRecord,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -597,10 +625,18 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.App.mutate(ctx, m)
 	case *AppBrandingMutation:
 		return c.AppBranding.mutate(ctx, m)
+	case *AppBuildArtifactMutation:
+		return c.AppBuildArtifact.mutate(ctx, m)
 	case *AppBuildJobMutation:
 		return c.AppBuildJob.mutate(ctx, m)
+	case *AppDesktopBrandingMutation:
+		return c.AppDesktopBranding.mutate(ctx, m)
+	case *AppSourceSnapshotMutation:
+		return c.AppSourceSnapshot.mutate(ctx, m)
 	case *AuditMutation:
 		return c.Audit.mutate(ctx, m)
+	case *DesktopBrandingMutation:
+		return c.DesktopBranding.mutate(ctx, m)
 	case *EntitlementMutation:
 		return c.Entitlement.mutate(ctx, m)
 	case *GitBotMutation:
@@ -2504,6 +2540,141 @@ func (c *AppBrandingClient) mutate(ctx context.Context, m *AppBrandingMutation) 
 	}
 }
 
+// AppBuildArtifactClient is a client for the AppBuildArtifact schema.
+type AppBuildArtifactClient struct {
+	config
+}
+
+// NewAppBuildArtifactClient returns a client for the AppBuildArtifact from the given config.
+func NewAppBuildArtifactClient(c config) *AppBuildArtifactClient {
+	return &AppBuildArtifactClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `appbuildartifact.Hooks(f(g(h())))`.
+func (c *AppBuildArtifactClient) Use(hooks ...Hook) {
+	c.hooks.AppBuildArtifact = append(c.hooks.AppBuildArtifact, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `appbuildartifact.Intercept(f(g(h())))`.
+func (c *AppBuildArtifactClient) Intercept(interceptors ...Interceptor) {
+	c.inters.AppBuildArtifact = append(c.inters.AppBuildArtifact, interceptors...)
+}
+
+// Create returns a builder for creating a AppBuildArtifact entity.
+func (c *AppBuildArtifactClient) Create() *AppBuildArtifactCreate {
+	mutation := newAppBuildArtifactMutation(c.config, OpCreate)
+	return &AppBuildArtifactCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of AppBuildArtifact entities.
+func (c *AppBuildArtifactClient) CreateBulk(builders ...*AppBuildArtifactCreate) *AppBuildArtifactCreateBulk {
+	return &AppBuildArtifactCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *AppBuildArtifactClient) MapCreateBulk(slice any, setFunc func(*AppBuildArtifactCreate, int)) *AppBuildArtifactCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &AppBuildArtifactCreateBulk{err: fmt.Errorf("calling to AppBuildArtifactClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*AppBuildArtifactCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &AppBuildArtifactCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for AppBuildArtifact.
+func (c *AppBuildArtifactClient) Update() *AppBuildArtifactUpdate {
+	mutation := newAppBuildArtifactMutation(c.config, OpUpdate)
+	return &AppBuildArtifactUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *AppBuildArtifactClient) UpdateOne(_m *AppBuildArtifact) *AppBuildArtifactUpdateOne {
+	mutation := newAppBuildArtifactMutation(c.config, OpUpdateOne, withAppBuildArtifact(_m))
+	return &AppBuildArtifactUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *AppBuildArtifactClient) UpdateOneID(id uuid.UUID) *AppBuildArtifactUpdateOne {
+	mutation := newAppBuildArtifactMutation(c.config, OpUpdateOne, withAppBuildArtifactID(id))
+	return &AppBuildArtifactUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for AppBuildArtifact.
+func (c *AppBuildArtifactClient) Delete() *AppBuildArtifactDelete {
+	mutation := newAppBuildArtifactMutation(c.config, OpDelete)
+	return &AppBuildArtifactDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *AppBuildArtifactClient) DeleteOne(_m *AppBuildArtifact) *AppBuildArtifactDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *AppBuildArtifactClient) DeleteOneID(id uuid.UUID) *AppBuildArtifactDeleteOne {
+	builder := c.Delete().Where(appbuildartifact.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &AppBuildArtifactDeleteOne{builder}
+}
+
+// Query returns a query builder for AppBuildArtifact.
+func (c *AppBuildArtifactClient) Query() *AppBuildArtifactQuery {
+	return &AppBuildArtifactQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeAppBuildArtifact},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a AppBuildArtifact entity by its id.
+func (c *AppBuildArtifactClient) Get(ctx context.Context, id uuid.UUID) (*AppBuildArtifact, error) {
+	return c.Query().Where(appbuildartifact.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *AppBuildArtifactClient) GetX(ctx context.Context, id uuid.UUID) *AppBuildArtifact {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *AppBuildArtifactClient) Hooks() []Hook {
+	hooks := c.hooks.AppBuildArtifact
+	return append(hooks[:len(hooks):len(hooks)], appbuildartifact.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *AppBuildArtifactClient) Interceptors() []Interceptor {
+	inters := c.inters.AppBuildArtifact
+	return append(inters[:len(inters):len(inters)], appbuildartifact.Interceptors[:]...)
+}
+
+func (c *AppBuildArtifactClient) mutate(ctx context.Context, m *AppBuildArtifactMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&AppBuildArtifactCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&AppBuildArtifactUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&AppBuildArtifactUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&AppBuildArtifactDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("db: unknown AppBuildArtifact mutation op: %q", m.Op())
+	}
+}
+
 // AppBuildJobClient is a client for the AppBuildJob schema.
 type AppBuildJobClient struct {
 	config
@@ -2636,6 +2807,274 @@ func (c *AppBuildJobClient) mutate(ctx context.Context, m *AppBuildJobMutation) 
 		return (&AppBuildJobDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("db: unknown AppBuildJob mutation op: %q", m.Op())
+	}
+}
+
+// AppDesktopBrandingClient is a client for the AppDesktopBranding schema.
+type AppDesktopBrandingClient struct {
+	config
+}
+
+// NewAppDesktopBrandingClient returns a client for the AppDesktopBranding from the given config.
+func NewAppDesktopBrandingClient(c config) *AppDesktopBrandingClient {
+	return &AppDesktopBrandingClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `appdesktopbranding.Hooks(f(g(h())))`.
+func (c *AppDesktopBrandingClient) Use(hooks ...Hook) {
+	c.hooks.AppDesktopBranding = append(c.hooks.AppDesktopBranding, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `appdesktopbranding.Intercept(f(g(h())))`.
+func (c *AppDesktopBrandingClient) Intercept(interceptors ...Interceptor) {
+	c.inters.AppDesktopBranding = append(c.inters.AppDesktopBranding, interceptors...)
+}
+
+// Create returns a builder for creating a AppDesktopBranding entity.
+func (c *AppDesktopBrandingClient) Create() *AppDesktopBrandingCreate {
+	mutation := newAppDesktopBrandingMutation(c.config, OpCreate)
+	return &AppDesktopBrandingCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of AppDesktopBranding entities.
+func (c *AppDesktopBrandingClient) CreateBulk(builders ...*AppDesktopBrandingCreate) *AppDesktopBrandingCreateBulk {
+	return &AppDesktopBrandingCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *AppDesktopBrandingClient) MapCreateBulk(slice any, setFunc func(*AppDesktopBrandingCreate, int)) *AppDesktopBrandingCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &AppDesktopBrandingCreateBulk{err: fmt.Errorf("calling to AppDesktopBrandingClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*AppDesktopBrandingCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &AppDesktopBrandingCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for AppDesktopBranding.
+func (c *AppDesktopBrandingClient) Update() *AppDesktopBrandingUpdate {
+	mutation := newAppDesktopBrandingMutation(c.config, OpUpdate)
+	return &AppDesktopBrandingUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *AppDesktopBrandingClient) UpdateOne(_m *AppDesktopBranding) *AppDesktopBrandingUpdateOne {
+	mutation := newAppDesktopBrandingMutation(c.config, OpUpdateOne, withAppDesktopBranding(_m))
+	return &AppDesktopBrandingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *AppDesktopBrandingClient) UpdateOneID(id uuid.UUID) *AppDesktopBrandingUpdateOne {
+	mutation := newAppDesktopBrandingMutation(c.config, OpUpdateOne, withAppDesktopBrandingID(id))
+	return &AppDesktopBrandingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for AppDesktopBranding.
+func (c *AppDesktopBrandingClient) Delete() *AppDesktopBrandingDelete {
+	mutation := newAppDesktopBrandingMutation(c.config, OpDelete)
+	return &AppDesktopBrandingDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *AppDesktopBrandingClient) DeleteOne(_m *AppDesktopBranding) *AppDesktopBrandingDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *AppDesktopBrandingClient) DeleteOneID(id uuid.UUID) *AppDesktopBrandingDeleteOne {
+	builder := c.Delete().Where(appdesktopbranding.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &AppDesktopBrandingDeleteOne{builder}
+}
+
+// Query returns a query builder for AppDesktopBranding.
+func (c *AppDesktopBrandingClient) Query() *AppDesktopBrandingQuery {
+	return &AppDesktopBrandingQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeAppDesktopBranding},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a AppDesktopBranding entity by its id.
+func (c *AppDesktopBrandingClient) Get(ctx context.Context, id uuid.UUID) (*AppDesktopBranding, error) {
+	return c.Query().Where(appdesktopbranding.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *AppDesktopBrandingClient) GetX(ctx context.Context, id uuid.UUID) *AppDesktopBranding {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *AppDesktopBrandingClient) Hooks() []Hook {
+	hooks := c.hooks.AppDesktopBranding
+	return append(hooks[:len(hooks):len(hooks)], appdesktopbranding.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *AppDesktopBrandingClient) Interceptors() []Interceptor {
+	inters := c.inters.AppDesktopBranding
+	return append(inters[:len(inters):len(inters)], appdesktopbranding.Interceptors[:]...)
+}
+
+func (c *AppDesktopBrandingClient) mutate(ctx context.Context, m *AppDesktopBrandingMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&AppDesktopBrandingCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&AppDesktopBrandingUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&AppDesktopBrandingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&AppDesktopBrandingDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("db: unknown AppDesktopBranding mutation op: %q", m.Op())
+	}
+}
+
+// AppSourceSnapshotClient is a client for the AppSourceSnapshot schema.
+type AppSourceSnapshotClient struct {
+	config
+}
+
+// NewAppSourceSnapshotClient returns a client for the AppSourceSnapshot from the given config.
+func NewAppSourceSnapshotClient(c config) *AppSourceSnapshotClient {
+	return &AppSourceSnapshotClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `appsourcesnapshot.Hooks(f(g(h())))`.
+func (c *AppSourceSnapshotClient) Use(hooks ...Hook) {
+	c.hooks.AppSourceSnapshot = append(c.hooks.AppSourceSnapshot, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `appsourcesnapshot.Intercept(f(g(h())))`.
+func (c *AppSourceSnapshotClient) Intercept(interceptors ...Interceptor) {
+	c.inters.AppSourceSnapshot = append(c.inters.AppSourceSnapshot, interceptors...)
+}
+
+// Create returns a builder for creating a AppSourceSnapshot entity.
+func (c *AppSourceSnapshotClient) Create() *AppSourceSnapshotCreate {
+	mutation := newAppSourceSnapshotMutation(c.config, OpCreate)
+	return &AppSourceSnapshotCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of AppSourceSnapshot entities.
+func (c *AppSourceSnapshotClient) CreateBulk(builders ...*AppSourceSnapshotCreate) *AppSourceSnapshotCreateBulk {
+	return &AppSourceSnapshotCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *AppSourceSnapshotClient) MapCreateBulk(slice any, setFunc func(*AppSourceSnapshotCreate, int)) *AppSourceSnapshotCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &AppSourceSnapshotCreateBulk{err: fmt.Errorf("calling to AppSourceSnapshotClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*AppSourceSnapshotCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &AppSourceSnapshotCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for AppSourceSnapshot.
+func (c *AppSourceSnapshotClient) Update() *AppSourceSnapshotUpdate {
+	mutation := newAppSourceSnapshotMutation(c.config, OpUpdate)
+	return &AppSourceSnapshotUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *AppSourceSnapshotClient) UpdateOne(_m *AppSourceSnapshot) *AppSourceSnapshotUpdateOne {
+	mutation := newAppSourceSnapshotMutation(c.config, OpUpdateOne, withAppSourceSnapshot(_m))
+	return &AppSourceSnapshotUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *AppSourceSnapshotClient) UpdateOneID(id uuid.UUID) *AppSourceSnapshotUpdateOne {
+	mutation := newAppSourceSnapshotMutation(c.config, OpUpdateOne, withAppSourceSnapshotID(id))
+	return &AppSourceSnapshotUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for AppSourceSnapshot.
+func (c *AppSourceSnapshotClient) Delete() *AppSourceSnapshotDelete {
+	mutation := newAppSourceSnapshotMutation(c.config, OpDelete)
+	return &AppSourceSnapshotDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *AppSourceSnapshotClient) DeleteOne(_m *AppSourceSnapshot) *AppSourceSnapshotDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *AppSourceSnapshotClient) DeleteOneID(id uuid.UUID) *AppSourceSnapshotDeleteOne {
+	builder := c.Delete().Where(appsourcesnapshot.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &AppSourceSnapshotDeleteOne{builder}
+}
+
+// Query returns a query builder for AppSourceSnapshot.
+func (c *AppSourceSnapshotClient) Query() *AppSourceSnapshotQuery {
+	return &AppSourceSnapshotQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeAppSourceSnapshot},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a AppSourceSnapshot entity by its id.
+func (c *AppSourceSnapshotClient) Get(ctx context.Context, id uuid.UUID) (*AppSourceSnapshot, error) {
+	return c.Query().Where(appsourcesnapshot.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *AppSourceSnapshotClient) GetX(ctx context.Context, id uuid.UUID) *AppSourceSnapshot {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *AppSourceSnapshotClient) Hooks() []Hook {
+	return c.hooks.AppSourceSnapshot
+}
+
+// Interceptors returns the client interceptors.
+func (c *AppSourceSnapshotClient) Interceptors() []Interceptor {
+	return c.inters.AppSourceSnapshot
+}
+
+func (c *AppSourceSnapshotClient) mutate(ctx context.Context, m *AppSourceSnapshotMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&AppSourceSnapshotCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&AppSourceSnapshotUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&AppSourceSnapshotUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&AppSourceSnapshotDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("db: unknown AppSourceSnapshot mutation op: %q", m.Op())
 	}
 }
 
@@ -2785,6 +3224,141 @@ func (c *AuditClient) mutate(ctx context.Context, m *AuditMutation) (Value, erro
 		return (&AuditDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("db: unknown Audit mutation op: %q", m.Op())
+	}
+}
+
+// DesktopBrandingClient is a client for the DesktopBranding schema.
+type DesktopBrandingClient struct {
+	config
+}
+
+// NewDesktopBrandingClient returns a client for the DesktopBranding from the given config.
+func NewDesktopBrandingClient(c config) *DesktopBrandingClient {
+	return &DesktopBrandingClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `desktopbranding.Hooks(f(g(h())))`.
+func (c *DesktopBrandingClient) Use(hooks ...Hook) {
+	c.hooks.DesktopBranding = append(c.hooks.DesktopBranding, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `desktopbranding.Intercept(f(g(h())))`.
+func (c *DesktopBrandingClient) Intercept(interceptors ...Interceptor) {
+	c.inters.DesktopBranding = append(c.inters.DesktopBranding, interceptors...)
+}
+
+// Create returns a builder for creating a DesktopBranding entity.
+func (c *DesktopBrandingClient) Create() *DesktopBrandingCreate {
+	mutation := newDesktopBrandingMutation(c.config, OpCreate)
+	return &DesktopBrandingCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of DesktopBranding entities.
+func (c *DesktopBrandingClient) CreateBulk(builders ...*DesktopBrandingCreate) *DesktopBrandingCreateBulk {
+	return &DesktopBrandingCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *DesktopBrandingClient) MapCreateBulk(slice any, setFunc func(*DesktopBrandingCreate, int)) *DesktopBrandingCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &DesktopBrandingCreateBulk{err: fmt.Errorf("calling to DesktopBrandingClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*DesktopBrandingCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &DesktopBrandingCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for DesktopBranding.
+func (c *DesktopBrandingClient) Update() *DesktopBrandingUpdate {
+	mutation := newDesktopBrandingMutation(c.config, OpUpdate)
+	return &DesktopBrandingUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *DesktopBrandingClient) UpdateOne(_m *DesktopBranding) *DesktopBrandingUpdateOne {
+	mutation := newDesktopBrandingMutation(c.config, OpUpdateOne, withDesktopBranding(_m))
+	return &DesktopBrandingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *DesktopBrandingClient) UpdateOneID(id uuid.UUID) *DesktopBrandingUpdateOne {
+	mutation := newDesktopBrandingMutation(c.config, OpUpdateOne, withDesktopBrandingID(id))
+	return &DesktopBrandingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for DesktopBranding.
+func (c *DesktopBrandingClient) Delete() *DesktopBrandingDelete {
+	mutation := newDesktopBrandingMutation(c.config, OpDelete)
+	return &DesktopBrandingDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *DesktopBrandingClient) DeleteOne(_m *DesktopBranding) *DesktopBrandingDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *DesktopBrandingClient) DeleteOneID(id uuid.UUID) *DesktopBrandingDeleteOne {
+	builder := c.Delete().Where(desktopbranding.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &DesktopBrandingDeleteOne{builder}
+}
+
+// Query returns a query builder for DesktopBranding.
+func (c *DesktopBrandingClient) Query() *DesktopBrandingQuery {
+	return &DesktopBrandingQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeDesktopBranding},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a DesktopBranding entity by its id.
+func (c *DesktopBrandingClient) Get(ctx context.Context, id uuid.UUID) (*DesktopBranding, error) {
+	return c.Query().Where(desktopbranding.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *DesktopBrandingClient) GetX(ctx context.Context, id uuid.UUID) *DesktopBranding {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *DesktopBrandingClient) Hooks() []Hook {
+	hooks := c.hooks.DesktopBranding
+	return append(hooks[:len(hooks):len(hooks)], desktopbranding.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *DesktopBrandingClient) Interceptors() []Interceptor {
+	inters := c.inters.DesktopBranding
+	return append(inters[:len(inters):len(inters)], desktopbranding.Interceptors[:]...)
+}
+
+func (c *DesktopBrandingClient) mutate(ctx context.Context, m *DesktopBrandingMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&DesktopBrandingCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&DesktopBrandingUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&DesktopBrandingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&DesktopBrandingDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("db: unknown DesktopBranding mutation op: %q", m.Op())
 	}
 }
 
@@ -11442,8 +12016,9 @@ type (
 	hooks struct {
 		AgentPlugin, AgentPluginRepo, AgentPluginVersion, AgentRule, AgentRuleVersion,
 		AgentSkill, AgentSkillGroupBinding, AgentSkillRepo, AgentSkillVersion,
-		AgentSyncJob, App, AppBranding, AppBuildJob, Audit, Entitlement, GitBot,
-		GitBotTask, GitBotUser, GitIdentity, GitTask, Host, Image, MCPTool,
+		AgentSyncJob, App, AppBranding, AppBuildArtifact, AppBuildJob,
+		AppDesktopBranding, AppSourceSnapshot, Audit, DesktopBranding, Entitlement,
+		GitBot, GitBotTask, GitBotUser, GitIdentity, GitTask, Host, Image, MCPTool,
 		MCPToolCall, MCPUpstream, MCPUserToolSetting, Model, ModelApiKey, ModelPricing,
 		NotifyChannel, NotifySendLog, NotifySubscription, Project, ProjectCollaborator,
 		ProjectGitBot, ProjectIssue, ProjectIssueComment, ProjectTask, Task,
@@ -11456,8 +12031,9 @@ type (
 	inters struct {
 		AgentPlugin, AgentPluginRepo, AgentPluginVersion, AgentRule, AgentRuleVersion,
 		AgentSkill, AgentSkillGroupBinding, AgentSkillRepo, AgentSkillVersion,
-		AgentSyncJob, App, AppBranding, AppBuildJob, Audit, Entitlement, GitBot,
-		GitBotTask, GitBotUser, GitIdentity, GitTask, Host, Image, MCPTool,
+		AgentSyncJob, App, AppBranding, AppBuildArtifact, AppBuildJob,
+		AppDesktopBranding, AppSourceSnapshot, Audit, DesktopBranding, Entitlement,
+		GitBot, GitBotTask, GitBotUser, GitIdentity, GitTask, Host, Image, MCPTool,
 		MCPToolCall, MCPUpstream, MCPUserToolSetting, Model, ModelApiKey, ModelPricing,
 		NotifyChannel, NotifySendLog, NotifySubscription, Project, ProjectCollaborator,
 		ProjectGitBot, ProjectIssue, ProjectIssueComment, ProjectTask, Task,

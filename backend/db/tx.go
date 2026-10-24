@@ -38,10 +38,18 @@ type Tx struct {
 	App *AppClient
 	// AppBranding is the client for interacting with the AppBranding builders.
 	AppBranding *AppBrandingClient
+	// AppBuildArtifact is the client for interacting with the AppBuildArtifact builders.
+	AppBuildArtifact *AppBuildArtifactClient
 	// AppBuildJob is the client for interacting with the AppBuildJob builders.
 	AppBuildJob *AppBuildJobClient
+	// AppDesktopBranding is the client for interacting with the AppDesktopBranding builders.
+	AppDesktopBranding *AppDesktopBrandingClient
+	// AppSourceSnapshot is the client for interacting with the AppSourceSnapshot builders.
+	AppSourceSnapshot *AppSourceSnapshotClient
 	// Audit is the client for interacting with the Audit builders.
 	Audit *AuditClient
+	// DesktopBranding is the client for interacting with the DesktopBranding builders.
+	DesktopBranding *DesktopBrandingClient
 	// Entitlement is the client for interacting with the Entitlement builders.
 	Entitlement *EntitlementClient
 	// GitBot is the client for interacting with the GitBot builders.
@@ -275,8 +283,12 @@ func (tx *Tx) init() {
 	tx.AgentSyncJob = NewAgentSyncJobClient(tx.config)
 	tx.App = NewAppClient(tx.config)
 	tx.AppBranding = NewAppBrandingClient(tx.config)
+	tx.AppBuildArtifact = NewAppBuildArtifactClient(tx.config)
 	tx.AppBuildJob = NewAppBuildJobClient(tx.config)
+	tx.AppDesktopBranding = NewAppDesktopBrandingClient(tx.config)
+	tx.AppSourceSnapshot = NewAppSourceSnapshotClient(tx.config)
 	tx.Audit = NewAuditClient(tx.config)
+	tx.DesktopBranding = NewDesktopBrandingClient(tx.config)
 	tx.Entitlement = NewEntitlementClient(tx.config)
 	tx.GitBot = NewGitBotClient(tx.config)
 	tx.GitBotTask = NewGitBotTaskClient(tx.config)

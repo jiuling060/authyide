@@ -42,11 +42,23 @@ type App func(*sql.Selector)
 // AppBranding is the predicate function for appbranding builders.
 type AppBranding func(*sql.Selector)
 
+// AppBuildArtifact is the predicate function for appbuildartifact builders.
+type AppBuildArtifact func(*sql.Selector)
+
 // AppBuildJob is the predicate function for appbuildjob builders.
 type AppBuildJob func(*sql.Selector)
 
+// AppDesktopBranding is the predicate function for appdesktopbranding builders.
+type AppDesktopBranding func(*sql.Selector)
+
+// AppSourceSnapshot is the predicate function for appsourcesnapshot builders.
+type AppSourceSnapshot func(*sql.Selector)
+
 // Audit is the predicate function for audit builders.
 type Audit func(*sql.Selector)
+
+// DesktopBranding is the predicate function for desktopbranding builders.
+type DesktopBranding func(*sql.Selector)
 
 // Entitlement is the predicate function for entitlement builders.
 type Entitlement func(*sql.Selector)

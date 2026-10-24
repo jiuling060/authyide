@@ -14,6 +14,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"github.com/chaitin/MonkeyCode/backend/db/app"
 	"github.com/chaitin/MonkeyCode/backend/db/appbuildjob"
+	"github.com/chaitin/MonkeyCode/backend/db/appsourcesnapshot"
 	"github.com/chaitin/MonkeyCode/backend/db/audit"
 	"github.com/chaitin/MonkeyCode/backend/db/gitbot"
 	"github.com/chaitin/MonkeyCode/backend/db/host"
@@ -222,6 +223,51 @@ func (q *AppBuildJobQuery) After(ctx context.Context, cursor string, limit int) 
 		return nil, nil, err
 	}
 	q.Order(appbuildjob.ByCreatedAt(sql.OrderDesc()), appbuildjob.ByID(sql.OrderDesc()))
+	q.Limit(limit + 1)
+
+	if i != nil {
+		q.Where(func(s *sql.Selector) {
+			s.Where(sql.Or(
+				sql.LT(s.C("created_at"), i.CreatedAt),
+				sql.And(
+					sql.EQ(s.C("created_at"), i.CreatedAt),
+					sql.LT(s.C("id"), i.ID),
+				),
+			))
+		})
+	}
+	nodes, err := q.All(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	res := &Cursor{}
+	if len(nodes) > limit {
+		res.HasNextPage = true
+		nodes = nodes[:limit]
+	}
+
+	if len(nodes) > 0 {
+		last := nodes[len(nodes)-1]
+		i := &createdAtCursor{
+			CreatedAt: last.CreatedAt,
+			ID:        last.ID,
+		}
+		cursor, err := i.marshal()
+		if err != nil {
+			return nil, nil, err
+		}
+		res.Cursor = cursor
+	}
+	return nodes, res, nil
+}
+
+func (q *AppSourceSnapshotQuery) After(ctx context.Context, cursor string, limit int) ([]*AppSourceSnapshot, *Cursor, error) {
+	i, err := unmarshalCreatedAt(cursor)
+	if err != nil {
+		return nil, nil, err
+	}
+	q.Order(appsourcesnapshot.ByCreatedAt(sql.OrderDesc()), appsourcesnapshot.ByID(sql.OrderDesc()))
 	q.Limit(limit + 1)
 
 	if i != nil {

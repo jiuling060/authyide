@@ -70,6 +70,16 @@ func AppID(v uuid.UUID) predicate.AppBuildJob {
 	return predicate.AppBuildJob(sql.FieldEQ(FieldAppID, v))
 }
 
+// SourceSnapshotID applies equality check predicate on the "source_snapshot_id" field. It's identical to SourceSnapshotIDEQ.
+func SourceSnapshotID(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldEQ(FieldSourceSnapshotID, v))
+}
+
+// SourceTaskID applies equality check predicate on the "source_task_id" field. It's identical to SourceTaskIDEQ.
+func SourceTaskID(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldEQ(FieldSourceTaskID, v))
+}
+
 // Platform applies equality check predicate on the "platform" field. It's identical to PlatformEQ.
 func Platform(v string) predicate.AppBuildJob {
 	return predicate.AppBuildJob(sql.FieldEQ(FieldPlatform, v))
@@ -308,6 +318,106 @@ func AppIDIsNil() predicate.AppBuildJob {
 // AppIDNotNil applies the NotNil predicate on the "app_id" field.
 func AppIDNotNil() predicate.AppBuildJob {
 	return predicate.AppBuildJob(sql.FieldNotNull(FieldAppID))
+}
+
+// SourceSnapshotIDEQ applies the EQ predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDEQ(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldEQ(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDNEQ applies the NEQ predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDNEQ(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldNEQ(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDIn applies the In predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDIn(vs ...uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldIn(FieldSourceSnapshotID, vs...))
+}
+
+// SourceSnapshotIDNotIn applies the NotIn predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDNotIn(vs ...uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldNotIn(FieldSourceSnapshotID, vs...))
+}
+
+// SourceSnapshotIDGT applies the GT predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDGT(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldGT(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDGTE applies the GTE predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDGTE(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldGTE(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDLT applies the LT predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDLT(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldLT(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDLTE applies the LTE predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDLTE(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldLTE(FieldSourceSnapshotID, v))
+}
+
+// SourceSnapshotIDIsNil applies the IsNil predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDIsNil() predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldIsNull(FieldSourceSnapshotID))
+}
+
+// SourceSnapshotIDNotNil applies the NotNil predicate on the "source_snapshot_id" field.
+func SourceSnapshotIDNotNil() predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldNotNull(FieldSourceSnapshotID))
+}
+
+// SourceTaskIDEQ applies the EQ predicate on the "source_task_id" field.
+func SourceTaskIDEQ(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldEQ(FieldSourceTaskID, v))
+}
+
+// SourceTaskIDNEQ applies the NEQ predicate on the "source_task_id" field.
+func SourceTaskIDNEQ(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldNEQ(FieldSourceTaskID, v))
+}
+
+// SourceTaskIDIn applies the In predicate on the "source_task_id" field.
+func SourceTaskIDIn(vs ...uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldIn(FieldSourceTaskID, vs...))
+}
+
+// SourceTaskIDNotIn applies the NotIn predicate on the "source_task_id" field.
+func SourceTaskIDNotIn(vs ...uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldNotIn(FieldSourceTaskID, vs...))
+}
+
+// SourceTaskIDGT applies the GT predicate on the "source_task_id" field.
+func SourceTaskIDGT(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldGT(FieldSourceTaskID, v))
+}
+
+// SourceTaskIDGTE applies the GTE predicate on the "source_task_id" field.
+func SourceTaskIDGTE(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldGTE(FieldSourceTaskID, v))
+}
+
+// SourceTaskIDLT applies the LT predicate on the "source_task_id" field.
+func SourceTaskIDLT(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldLT(FieldSourceTaskID, v))
+}
+
+// SourceTaskIDLTE applies the LTE predicate on the "source_task_id" field.
+func SourceTaskIDLTE(v uuid.UUID) predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldLTE(FieldSourceTaskID, v))
+}
+
+// SourceTaskIDIsNil applies the IsNil predicate on the "source_task_id" field.
+func SourceTaskIDIsNil() predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldIsNull(FieldSourceTaskID))
+}
+
+// SourceTaskIDNotNil applies the NotNil predicate on the "source_task_id" field.
+func SourceTaskIDNotNil() predicate.AppBuildJob {
+	return predicate.AppBuildJob(sql.FieldNotNull(FieldSourceTaskID))
 }
 
 // PlatformEQ applies the EQ predicate on the "platform" field.

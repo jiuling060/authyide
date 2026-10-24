@@ -14,7 +14,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 RELEASE = ROOT / "target/universal-apple-darwin/release"
-APP = RELEASE / "bundle/macos/AuthyIDE.app"
+APP = RELEASE / f"bundle/macos/{json.loads((ROOT / 'tauri.conf.json').read_text(encoding='utf-8'))['productName']}.app"
 MANIFEST = RELEASE / "macos-release-candidate.json"
 INPUTS = (
     RELEASE / "monkeycode-desktop",

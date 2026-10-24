@@ -45,6 +45,10 @@ func (App) Fields() []ent.Field {
 		field.String("name").NotEmpty(),
 		field.String("package_id").NotEmpty(),
 		field.String("icon_key").Optional(),
+		// source_snapshot_id points at the session source snapshot this app builds
+		// from. Nil means the app builds from the instance-wide template, which is
+		// the admin-console behavior and the default for newly created apps.
+		field.UUID("source_snapshot_id", uuid.UUID{}).Optional().Nillable(),
 		// ad_network is one of packer/ad_networks.yaml; "none" means the app ships
 		// without ads. The ad app id belongs to the end user's own account.
 		field.String("ad_network").Default("none"),

@@ -13,6 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read productName from tauri config
+        run: |
+          PRODUCT_NAME=$(python3 -c 'import json; print(json.load(open("desktop/tauri.conf.json"))["productName"])')
+          echo "PRODUCT_NAME=$PRODUCT_NAME" >> "$GITHUB_ENV"
+
       - uses: actions/setup-go@v5
         with:
           go-version: stable
@@ -107,12 +112,12 @@ jobs:
 
       - name: Zip .app
         working-directory: desktop/target/universal-apple-darwin/release/bundle
-        run: ditto -c -k --keepParent macos/AuthyIDE.app AuthyIDE-macos-universal.app.zip
+         run: ditto -c -k --keepParent "macos/${PRODUCT_NAME}.app" "${PRODUCT_NAME}-macos-universal.app.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AuthyIDE-macos-universal
+          name: ${{ env.PRODUCT_NAME }}-macos-universal
           path: |
-            desktop/target/universal-apple-darwin/release/bundle/AuthyIDE-macos-universal.app.zip
+            desktop/target/universal-apple-darwin/release/bundle/${{ env.PRODUCT_NAME }}-macos-universal.app.zip
             desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             desktop/target/universal-apple-darwin/release/bundle/updater/*

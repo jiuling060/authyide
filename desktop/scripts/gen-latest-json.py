@@ -32,29 +32,31 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 URL_BASE = "https://release.monkeycode-ai.com/public/desktop/"
 
 # 显式 UTF-8:Windows 的 Python 默认用 locale 编码(cp1252),读含中文的文件会炸
-version = json.loads((ROOT / "tauri.conf.json").read_text(encoding="utf-8"))["version"]
+_conf = json.loads((ROOT / "tauri.conf.json").read_text(encoding="utf-8"))
+version = _conf["version"]
+product_name = _conf["productName"]
 short = version.removesuffix(".0.0")  # 26071401.0.0 → 26071401
 
 platform = sys.argv[1] if len(sys.argv) > 1 else "macos"
 
 if platform == "macos":
     bundle = ROOT / "target/universal-apple-darwin/release/bundle"
-    src = bundle / "macos/AuthyIDE.app.tar.gz"
-    name = f"AuthyIDE_{short}_universal.app.tar.gz"
+    src = bundle / f"macos/{product_name}.app.tar.gz"
+    name = f"{product_name}_{short}_universal.app.tar.gz"
     manifest_name = "latest.json"
     # universal 包同时服务两种架构,两个 target key 指向同一 URL
     targets = ["darwin-aarch64", "darwin-x86_64"]
 elif platform == "windows":
     bundle = ROOT / "target/release/bundle"
-    src = bundle / f"nsis/AuthyIDE_{version}_x64-setup.exe"
-    name = f"AuthyIDE_{short}_x64-setup.exe"
+    src = bundle / f"nsis/{product_name}_{version}_x64-setup.exe"
+    name = f"{product_name}_{short}_x64-setup.exe"
     manifest_name = "latest-windows.json"
     targets = ["windows-x86_64"]
 elif platform == "linux":
     bundle = ROOT / "target/release/bundle"
     # AppImage 文件名用 Tauri 的 x86_64 命名(非 deb 的 amd64)
-    src = bundle / f"appimage/AuthyIDE_{version}_amd64.AppImage"
-    name = f"AuthyIDE_{short}_amd64.AppImage"
+    src = bundle / f"appimage/{product_name}_{version}_amd64.AppImage"
+    name = f"{product_name}_{short}_amd64.AppImage"
     manifest_name = "latest-linux.json"
     targets = ["linux-x86_64"]
 else:

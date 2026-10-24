@@ -355,3 +355,76 @@ other = "当前部署未启用 OTA 更新"
 
 [err-workspace-invalid]
 other = "移动端构建工作区不可用"
+
+
+# 桌面端打包与移动端全平台打包
+[err-platform-disabled]
+other = "当前部署未开放该平台的打包能力"
+
+[err-platform-invalid]
+other = "不支持的打包平台"
+
+[err-channel-invalid]
+other = "不支持的发布渠道"
+
+[err-channel-not-publishable]
+other = "该发布渠道不支持上传发布"
+
+[err-resource-insufficient]
+other = "打包资源不足，请稍后重试"
+
+[err-build-queue-full]
+other = "打包队列已满，请稍后重试"
+
+[err-build-failed]
+other = "打包失败，请查看构建日志"
+
+# 会话源码快照
+[err-snapshot-empty]
+other = "会话中没有可打包的源码"
+
+[err-snapshot-sync-failed]
+other = "会话源码同步失败"
+
+[err-snapshot-too-large]
+other = "会话源码超出打包体积限制"
+
+[err-snapshot-not-found]
+other = "会话源码快照不存在"
+
+[err-snapshot-stale]
+other = "会话源码快照已过期"
+
+[err-snapshot-corrupt]
+other = "会话源码快照已损坏"
+
+[err-app-source-snapshot-unbound]
+other = "应用尚未绑定会话源码快照"
+
+[err-app-build-quota-exceeded]
+other = "应用打包次数已达上限"
+
+[err-app-package-id-conflict]
+other = "应用包名已被占用"
+
+[err-build-daily-quota-exceeded]
+other = "今日打包次数已达上限"
+
+# 邮箱注册
+[err-register-email-invalid]
+other = "邮箱格式不正确"
+
+[err-register-password-invalid]
+other = "密码不符合要求"
+
+[err-register-email-taken]
+other = "邮箱已被注册"
+
+[err-register-token-invalid]
+other = "邮箱验证已失效，请重新获取验证邮件"
+
+[err-register-email-unverified]
+other = "邮箱尚未验证"
+
+[err-register-already-verified]
+other = "邮箱已验证"

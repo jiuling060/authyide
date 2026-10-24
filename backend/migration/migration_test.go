@@ -149,3 +149,71 @@ func TestAgentRulesExtensionSourceMigrationExists(t *testing.T) {
 		t.Fatalf("down migration does not drop extension source columns")
 	}
 }
+
+func TestAppBuildArtifactsMigrationIsReversible(t *testing.T) {
+	up, err := os.ReadFile("000038_create_app_build_artifacts.up.sql")
+	if err != nil {
+		t.Fatalf("read up migration: %v", err)
+	}
+	for _, want := range []string{
+		"CREATE TABLE app_build_artifacts",
+		"job_id          uuid NOT NULL REFERENCES app_build_jobs(id)",
+		"channel         character varying(32) NOT NULL",
+		"artifact_path   text NOT NULL",
+		"deleted_at      timestamp with time zone",
+		"CREATE UNIQUE INDEX uq_app_build_artifacts_job_channel",
+		"(job_id, channel) WHERE (deleted_at IS NULL)",
+		"idx_app_build_artifacts_platform_channel",
+	} {
+		if !strings.Contains(string(up), want) {
+			t.Fatalf("up migration missing %q", want)
+		}
+	}
+
+	down, err := os.ReadFile("000038_create_app_build_artifacts.down.sql")
+	if err != nil {
+		t.Fatalf("read down migration: %v", err)
+	}
+	for _, want := range []string{
+		"DROP INDEX IF EXISTS uq_app_build_artifacts_job_channel",
+		"DROP TABLE IF EXISTS app_build_artifacts",
+	} {
+		if !strings.Contains(string(down), want) {
+			t.Fatalf("down migration missing %q", want)
+		}
+	}
+}
+
+func TestDesktopBrandingMigrationIsReversible(t *testing.T) {
+	up, err := os.ReadFile("000039_create_desktop_branding.up.sql")
+	if err != nil {
+		t.Fatalf("read up migration: %v", err)
+	}
+	for _, want := range []string{
+		"CREATE TABLE desktop_branding",
+		"singleton_key     text NOT NULL DEFAULT 'authyide'",
+		"product_name      text NOT NULL DEFAULT ''",
+		"bundle_identifier text NOT NULL DEFAULT ''",
+		"updater_endpoint  text NOT NULL DEFAULT ''",
+		"icon_key          text NOT NULL DEFAULT ''",
+		"CREATE UNIQUE INDEX idx_desktop_branding_single",
+		"(singleton_key) WHERE (deleted_at IS NULL)",
+	} {
+		if !strings.Contains(string(up), want) {
+			t.Fatalf("up migration missing %q", want)
+		}
+	}
+
+	down, err := os.ReadFile("000039_create_desktop_branding.down.sql")
+	if err != nil {
+		t.Fatalf("read down migration: %v", err)
+	}
+	for _, want := range []string{
+		"DROP INDEX IF EXISTS idx_desktop_branding_single",
+		"DROP TABLE IF EXISTS desktop_branding",
+	} {
+		if !strings.Contains(string(down), want) {
+			t.Fatalf("down migration missing %q", want)
+		}
+	}
+}

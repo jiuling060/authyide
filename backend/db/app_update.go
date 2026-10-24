@@ -114,6 +114,26 @@ func (_u *AppUpdate) ClearIconKey() *AppUpdate {
 	return _u
 }
 
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (_u *AppUpdate) SetSourceSnapshotID(v uuid.UUID) *AppUpdate {
+	_u.mutation.SetSourceSnapshotID(v)
+	return _u
+}
+
+// SetNillableSourceSnapshotID sets the "source_snapshot_id" field if the given value is not nil.
+func (_u *AppUpdate) SetNillableSourceSnapshotID(v *uuid.UUID) *AppUpdate {
+	if v != nil {
+		_u.SetSourceSnapshotID(*v)
+	}
+	return _u
+}
+
+// ClearSourceSnapshotID clears the value of the "source_snapshot_id" field.
+func (_u *AppUpdate) ClearSourceSnapshotID() *AppUpdate {
+	_u.mutation.ClearSourceSnapshotID()
+	return _u
+}
+
 // SetAdNetwork sets the "ad_network" field.
 func (_u *AppUpdate) SetAdNetwork(v string) *AppUpdate {
 	_u.mutation.SetAdNetwork(v)
@@ -427,6 +447,12 @@ func (_u *AppUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.IconKeyCleared() {
 		_spec.ClearField(app.FieldIconKey, field.TypeString)
 	}
+	if value, ok := _u.mutation.SourceSnapshotID(); ok {
+		_spec.SetField(app.FieldSourceSnapshotID, field.TypeUUID, value)
+	}
+	if _u.mutation.SourceSnapshotIDCleared() {
+		_spec.ClearField(app.FieldSourceSnapshotID, field.TypeUUID)
+	}
 	if value, ok := _u.mutation.AdNetwork(); ok {
 		_spec.SetField(app.FieldAdNetwork, field.TypeString, value)
 	}
@@ -619,6 +645,26 @@ func (_u *AppUpdateOne) SetNillableIconKey(v *string) *AppUpdateOne {
 // ClearIconKey clears the value of the "icon_key" field.
 func (_u *AppUpdateOne) ClearIconKey() *AppUpdateOne {
 	_u.mutation.ClearIconKey()
+	return _u
+}
+
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (_u *AppUpdateOne) SetSourceSnapshotID(v uuid.UUID) *AppUpdateOne {
+	_u.mutation.SetSourceSnapshotID(v)
+	return _u
+}
+
+// SetNillableSourceSnapshotID sets the "source_snapshot_id" field if the given value is not nil.
+func (_u *AppUpdateOne) SetNillableSourceSnapshotID(v *uuid.UUID) *AppUpdateOne {
+	if v != nil {
+		_u.SetSourceSnapshotID(*v)
+	}
+	return _u
+}
+
+// ClearSourceSnapshotID clears the value of the "source_snapshot_id" field.
+func (_u *AppUpdateOne) ClearSourceSnapshotID() *AppUpdateOne {
+	_u.mutation.ClearSourceSnapshotID()
 	return _u
 }
 
@@ -964,6 +1010,12 @@ func (_u *AppUpdateOne) sqlSave(ctx context.Context) (_node *App, err error) {
 	}
 	if _u.mutation.IconKeyCleared() {
 		_spec.ClearField(app.FieldIconKey, field.TypeString)
+	}
+	if value, ok := _u.mutation.SourceSnapshotID(); ok {
+		_spec.SetField(app.FieldSourceSnapshotID, field.TypeUUID, value)
+	}
+	if _u.mutation.SourceSnapshotIDCleared() {
+		_spec.ClearField(app.FieldSourceSnapshotID, field.TypeUUID)
 	}
 	if value, ok := _u.mutation.AdNetwork(); ok {
 		_spec.SetField(app.FieldAdNetwork, field.TypeString, value)

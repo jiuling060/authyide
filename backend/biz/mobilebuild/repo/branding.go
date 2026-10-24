@@ -13,6 +13,9 @@ import (
 	"github.com/chaitin/MonkeyCode/backend/db"
 	"github.com/chaitin/MonkeyCode/backend/db/appbranding"
 	"github.com/chaitin/MonkeyCode/backend/db/appbuildjob"
+	"github.com/chaitin/MonkeyCode/backend/db/appsourcesnapshot"
+	udomain "github.com/chaitin/MonkeyCode/backend/domain"
+	"github.com/chaitin/MonkeyCode/backend/pkg/entx"
 )
 
 const brandingSingletonKey = "authyide"
@@ -177,7 +180,9 @@ func (r *appBuilderRepo) CreateJob(ctx context.Context, userID uuid.UUID, req *d
 		SetTargetVersion(req.Version).
 		SetVersionCode(req.VersionCode).
 		SetStatus(domain.BuildStatusQueued).
-		SetEnqueuedAt(time.Now())
+		SetEnqueuedAt(time.Now()).
+		SetNillableSourceSnapshotID(req.SourceSnapshotID).
+		SetNillableSourceTaskID(req.SourceTaskID)
 	if req.AppID != uuid.Nil {
 		create = create.SetNillableAppID(&req.AppID)
 	}
@@ -284,7 +289,17 @@ func (r *appBuilderRepo) SetJobLogTail(ctx context.Context, id uuid.UUID, tail s
 }
 
 func (r *appBuilderRepo) FinishJob(ctx context.Context, id uuid.UUID, res domain.JobResult) error {
-	update := r.db.AppBuildJob.UpdateOneID(id).
+	return entx.WithTx2(ctx, r.db, func(tx *db.Tx) error {
+		return r.finishJobTx(ctx, tx, id, res)
+	})
+}
+
+func (r *appBuilderRepo) finishJobTx(ctx context.Context, tx *db.Tx, id uuid.UUID, res domain.JobResult) error {
+	row, err := tx.AppBuildJob.Query().Where(appbuildjob.ID(id)).Only(ctx)
+	if err != nil {
+		return fmt.Errorf("get app build job: %w", err)
+	}
+	update := tx.AppBuildJob.UpdateOneID(id).
 		SetStatus(res.Status).
 		SetNillableFinishedAt(timePtr(time.Now())).
 		SetDurationMs(res.DurationMS).
@@ -303,6 +318,13 @@ func (r *appBuilderRepo) FinishJob(ctx context.Context, id uuid.UUID, res domain
 	}
 	if err := update.Exec(ctx); err != nil {
 		return fmt.Errorf("finish app build job: %w", err)
+	}
+	// The job row and the artifact rows commit together, so a crash between the
+	// two cannot leave a succeeded job whose channel set never landed.
+	if len(res.Artifacts) > 0 {
+		if err := r.saveArtifactsTx(ctx, tx, id, row.Platform, res.Artifacts); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -356,28 +378,56 @@ func jobAppID(v *uuid.UUID) uuid.UUID {
 	return *v
 }
 
+func (r *appBuilderRepo) GetJobSourceSnapshot(ctx context.Context, id uuid.UUID) (*domain.SourceSnapshot, error) {
+	job, err := r.db.AppBuildJob.Query().
+		Where(appbuildjob.ID(id)).
+		Only(ctx)
+	if err != nil || job == nil || job.SourceSnapshotID == nil {
+		return nil, nil
+	}
+	snap, err := r.db.AppSourceSnapshot.Query().
+		Where(appsourcesnapshot.ID(*job.SourceSnapshotID)).
+		Only(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load source snapshot: %w", err)
+	}
+	if snap.Status != udomain.SnapshotStatusReady {
+		return nil, fmt.Errorf("source snapshot %s is %s", snap.ID.String(), snap.Status)
+	}
+	if snap.ObjectKey == "" {
+		return nil, fmt.Errorf("source snapshot %s has no object", snap.ID.String())
+	}
+	return &domain.SourceSnapshot{
+		ObjectKey: snap.ObjectKey,
+		SHA256:    snap.Sha256,
+		SizeBytes: snap.SizeBytes,
+	}, nil
+}
+
 func jobFromRow(row *db.AppBuildJob) *domain.BuildJob {
 	if row == nil {
 		return nil
 	}
 	return &domain.BuildJob{
-		ID:             row.ID,
-		AppID:          jobAppID(row.AppID),
-		Platform:       row.Platform,
-		TargetVersion:  row.TargetVersion,
-		VersionCode:    row.VersionCode,
-		Status:         row.Status,
-		CurrentStep:    row.CurrentStep,
-		Error:          row.Error,
-		ExitCode:       row.ExitCode,
-		LogTail:        row.LogTail,
-		ArtifactPath:   row.ArtifactPath,
-		ArtifactSHA256: row.ArtifactSha256,
-		ArtifactSize:   row.ArtifactSize,
-		DurationMS:     row.DurationMs,
-		EnqueuedAt:     row.EnqueuedAt,
-		StartedAt:      row.StartedAt,
-		FinishedAt:     row.FinishedAt,
-		PublishedAt:    row.PublishedAt,
+		ID:               row.ID,
+		AppID:            jobAppID(row.AppID),
+		SourceSnapshotID: row.SourceSnapshotID,
+		SourceTaskID:     row.SourceTaskID,
+		Platform:         row.Platform,
+		TargetVersion:    row.TargetVersion,
+		VersionCode:      row.VersionCode,
+		Status:           row.Status,
+		CurrentStep:      row.CurrentStep,
+		Error:            row.Error,
+		ExitCode:         row.ExitCode,
+		LogTail:          row.LogTail,
+		ArtifactPath:     row.ArtifactPath,
+		ArtifactSHA256:   row.ArtifactSha256,
+		ArtifactSize:     row.ArtifactSize,
+		DurationMS:       row.DurationMs,
+		EnqueuedAt:       row.EnqueuedAt,
+		StartedAt:        row.StartedAt,
+		FinishedAt:       row.FinishedAt,
+		PublishedAt:      row.PublishedAt,
 	}
 }

@@ -58,6 +58,34 @@ func (_c *AppBuildJobCreate) SetNillableAppID(v *uuid.UUID) *AppBuildJobCreate {
 	return _c
 }
 
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (_c *AppBuildJobCreate) SetSourceSnapshotID(v uuid.UUID) *AppBuildJobCreate {
+	_c.mutation.SetSourceSnapshotID(v)
+	return _c
+}
+
+// SetNillableSourceSnapshotID sets the "source_snapshot_id" field if the given value is not nil.
+func (_c *AppBuildJobCreate) SetNillableSourceSnapshotID(v *uuid.UUID) *AppBuildJobCreate {
+	if v != nil {
+		_c.SetSourceSnapshotID(*v)
+	}
+	return _c
+}
+
+// SetSourceTaskID sets the "source_task_id" field.
+func (_c *AppBuildJobCreate) SetSourceTaskID(v uuid.UUID) *AppBuildJobCreate {
+	_c.mutation.SetSourceTaskID(v)
+	return _c
+}
+
+// SetNillableSourceTaskID sets the "source_task_id" field if the given value is not nil.
+func (_c *AppBuildJobCreate) SetNillableSourceTaskID(v *uuid.UUID) *AppBuildJobCreate {
+	if v != nil {
+		_c.SetSourceTaskID(*v)
+	}
+	return _c
+}
+
 // SetPlatform sets the "platform" field.
 func (_c *AppBuildJobCreate) SetPlatform(v string) *AppBuildJobCreate {
 	_c.mutation.SetPlatform(v)
@@ -510,6 +538,14 @@ func (_c *AppBuildJobCreate) createSpec() (*AppBuildJob, *sqlgraph.CreateSpec) {
 		_spec.SetField(appbuildjob.FieldAppID, field.TypeUUID, value)
 		_node.AppID = &value
 	}
+	if value, ok := _c.mutation.SourceSnapshotID(); ok {
+		_spec.SetField(appbuildjob.FieldSourceSnapshotID, field.TypeUUID, value)
+		_node.SourceSnapshotID = &value
+	}
+	if value, ok := _c.mutation.SourceTaskID(); ok {
+		_spec.SetField(appbuildjob.FieldSourceTaskID, field.TypeUUID, value)
+		_node.SourceTaskID = &value
+	}
 	if value, ok := _c.mutation.Platform(); ok {
 		_spec.SetField(appbuildjob.FieldPlatform, field.TypeString, value)
 		_node.Platform = value
@@ -687,6 +723,42 @@ func (u *AppBuildJobUpsert) UpdateAppID() *AppBuildJobUpsert {
 // ClearAppID clears the value of the "app_id" field.
 func (u *AppBuildJobUpsert) ClearAppID() *AppBuildJobUpsert {
 	u.SetNull(appbuildjob.FieldAppID)
+	return u
+}
+
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (u *AppBuildJobUpsert) SetSourceSnapshotID(v uuid.UUID) *AppBuildJobUpsert {
+	u.Set(appbuildjob.FieldSourceSnapshotID, v)
+	return u
+}
+
+// UpdateSourceSnapshotID sets the "source_snapshot_id" field to the value that was provided on create.
+func (u *AppBuildJobUpsert) UpdateSourceSnapshotID() *AppBuildJobUpsert {
+	u.SetExcluded(appbuildjob.FieldSourceSnapshotID)
+	return u
+}
+
+// ClearSourceSnapshotID clears the value of the "source_snapshot_id" field.
+func (u *AppBuildJobUpsert) ClearSourceSnapshotID() *AppBuildJobUpsert {
+	u.SetNull(appbuildjob.FieldSourceSnapshotID)
+	return u
+}
+
+// SetSourceTaskID sets the "source_task_id" field.
+func (u *AppBuildJobUpsert) SetSourceTaskID(v uuid.UUID) *AppBuildJobUpsert {
+	u.Set(appbuildjob.FieldSourceTaskID, v)
+	return u
+}
+
+// UpdateSourceTaskID sets the "source_task_id" field to the value that was provided on create.
+func (u *AppBuildJobUpsert) UpdateSourceTaskID() *AppBuildJobUpsert {
+	u.SetExcluded(appbuildjob.FieldSourceTaskID)
+	return u
+}
+
+// ClearSourceTaskID clears the value of the "source_task_id" field.
+func (u *AppBuildJobUpsert) ClearSourceTaskID() *AppBuildJobUpsert {
+	u.SetNull(appbuildjob.FieldSourceTaskID)
 	return u
 }
 
@@ -1121,6 +1193,48 @@ func (u *AppBuildJobUpsertOne) UpdateAppID() *AppBuildJobUpsertOne {
 func (u *AppBuildJobUpsertOne) ClearAppID() *AppBuildJobUpsertOne {
 	return u.Update(func(s *AppBuildJobUpsert) {
 		s.ClearAppID()
+	})
+}
+
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (u *AppBuildJobUpsertOne) SetSourceSnapshotID(v uuid.UUID) *AppBuildJobUpsertOne {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.SetSourceSnapshotID(v)
+	})
+}
+
+// UpdateSourceSnapshotID sets the "source_snapshot_id" field to the value that was provided on create.
+func (u *AppBuildJobUpsertOne) UpdateSourceSnapshotID() *AppBuildJobUpsertOne {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.UpdateSourceSnapshotID()
+	})
+}
+
+// ClearSourceSnapshotID clears the value of the "source_snapshot_id" field.
+func (u *AppBuildJobUpsertOne) ClearSourceSnapshotID() *AppBuildJobUpsertOne {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.ClearSourceSnapshotID()
+	})
+}
+
+// SetSourceTaskID sets the "source_task_id" field.
+func (u *AppBuildJobUpsertOne) SetSourceTaskID(v uuid.UUID) *AppBuildJobUpsertOne {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.SetSourceTaskID(v)
+	})
+}
+
+// UpdateSourceTaskID sets the "source_task_id" field to the value that was provided on create.
+func (u *AppBuildJobUpsertOne) UpdateSourceTaskID() *AppBuildJobUpsertOne {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.UpdateSourceTaskID()
+	})
+}
+
+// ClearSourceTaskID clears the value of the "source_task_id" field.
+func (u *AppBuildJobUpsertOne) ClearSourceTaskID() *AppBuildJobUpsertOne {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.ClearSourceTaskID()
 	})
 }
 
@@ -1777,6 +1891,48 @@ func (u *AppBuildJobUpsertBulk) UpdateAppID() *AppBuildJobUpsertBulk {
 func (u *AppBuildJobUpsertBulk) ClearAppID() *AppBuildJobUpsertBulk {
 	return u.Update(func(s *AppBuildJobUpsert) {
 		s.ClearAppID()
+	})
+}
+
+// SetSourceSnapshotID sets the "source_snapshot_id" field.
+func (u *AppBuildJobUpsertBulk) SetSourceSnapshotID(v uuid.UUID) *AppBuildJobUpsertBulk {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.SetSourceSnapshotID(v)
+	})
+}
+
+// UpdateSourceSnapshotID sets the "source_snapshot_id" field to the value that was provided on create.
+func (u *AppBuildJobUpsertBulk) UpdateSourceSnapshotID() *AppBuildJobUpsertBulk {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.UpdateSourceSnapshotID()
+	})
+}
+
+// ClearSourceSnapshotID clears the value of the "source_snapshot_id" field.
+func (u *AppBuildJobUpsertBulk) ClearSourceSnapshotID() *AppBuildJobUpsertBulk {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.ClearSourceSnapshotID()
+	})
+}
+
+// SetSourceTaskID sets the "source_task_id" field.
+func (u *AppBuildJobUpsertBulk) SetSourceTaskID(v uuid.UUID) *AppBuildJobUpsertBulk {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.SetSourceTaskID(v)
+	})
+}
+
+// UpdateSourceTaskID sets the "source_task_id" field to the value that was provided on create.
+func (u *AppBuildJobUpsertBulk) UpdateSourceTaskID() *AppBuildJobUpsertBulk {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.UpdateSourceTaskID()
+	})
+}
+
+// ClearSourceTaskID clears the value of the "source_task_id" field.
+func (u *AppBuildJobUpsertBulk) ClearSourceTaskID() *AppBuildJobUpsertBulk {
+	return u.Update(func(s *AppBuildJobUpsert) {
+		s.ClearSourceTaskID()
 	})
 }
 

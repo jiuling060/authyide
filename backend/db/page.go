@@ -179,6 +179,20 @@ func (_m *AppBrandingQuery) Page(ctx context.Context, page, size int) ([]*AppBra
 	return rs, &PageInfo{HasNextPage: has, TotalCount: int64(cnt)}, nil
 }
 
+func (_m *AppBuildArtifactQuery) Page(ctx context.Context, page, size int) ([]*AppBuildArtifact, *PageInfo, error) {
+	cnt, err := _m.Count(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	offset := size * (page - 1)
+	rs, err := _m.Offset(offset).Limit(size).All(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	has := (page * size) < cnt
+	return rs, &PageInfo{HasNextPage: has, TotalCount: int64(cnt)}, nil
+}
+
 func (_m *AppBuildJobQuery) Page(ctx context.Context, page, size int) ([]*AppBuildJob, *PageInfo, error) {
 	cnt, err := _m.Count(ctx)
 	if err != nil {
@@ -193,7 +207,49 @@ func (_m *AppBuildJobQuery) Page(ctx context.Context, page, size int) ([]*AppBui
 	return rs, &PageInfo{HasNextPage: has, TotalCount: int64(cnt)}, nil
 }
 
+func (_m *AppDesktopBrandingQuery) Page(ctx context.Context, page, size int) ([]*AppDesktopBranding, *PageInfo, error) {
+	cnt, err := _m.Count(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	offset := size * (page - 1)
+	rs, err := _m.Offset(offset).Limit(size).All(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	has := (page * size) < cnt
+	return rs, &PageInfo{HasNextPage: has, TotalCount: int64(cnt)}, nil
+}
+
+func (_m *AppSourceSnapshotQuery) Page(ctx context.Context, page, size int) ([]*AppSourceSnapshot, *PageInfo, error) {
+	cnt, err := _m.Count(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	offset := size * (page - 1)
+	rs, err := _m.Offset(offset).Limit(size).All(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	has := (page * size) < cnt
+	return rs, &PageInfo{HasNextPage: has, TotalCount: int64(cnt)}, nil
+}
+
 func (_m *AuditQuery) Page(ctx context.Context, page, size int) ([]*Audit, *PageInfo, error) {
+	cnt, err := _m.Count(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	offset := size * (page - 1)
+	rs, err := _m.Offset(offset).Limit(size).All(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	has := (page * size) < cnt
+	return rs, &PageInfo{HasNextPage: has, TotalCount: int64(cnt)}, nil
+}
+
+func (_m *DesktopBrandingQuery) Page(ctx context.Context, page, size int) ([]*DesktopBranding, *PageInfo, error) {
 	cnt, err := _m.Count(ctx)
 	if err != nil {
 		return nil, nil, err

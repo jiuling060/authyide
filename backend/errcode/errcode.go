@@ -177,6 +177,21 @@ var (
 	ErrBuildNotSucceeded    = web.NewErr(http.StatusOK, 11417, "err-build-not-succeeded")
 	ErrOtaDisabled          = web.NewErr(http.StatusOK, 11418, "err-ota-disabled")
 	ErrWorkspaceInvalid     = web.NewErr(http.StatusOK, 11419, "err-workspace-invalid")
-	ErrBuildQueueFull       = web.NewErr(http.StatusOK, 11425, "err-build-queue-full")
+	// 桌面端打包
+	ErrPlatformDisabled        = web.NewErr(http.StatusOK, 11420, "err-platform-disabled")
+	ErrPlatformInvalid         = web.NewErr(http.StatusOK, 11421, "err-platform-invalid")
+	ErrChannelInvalid          = web.NewErr(http.StatusOK, 11422, "err-channel-invalid")
+	ErrChannelNotPublishable   = web.NewErr(http.StatusOK, 11423, "err-channel-not-publishable")
+	ErrResourceInsufficient    = web.NewErr(http.StatusOK, 11424, "err-resource-insufficient")
+	ErrBuildQueueFull          = web.NewErr(http.StatusOK, 11425, "err-build-queue-full")
 	ErrBuildFailed          = web.NewErr(http.StatusOK, 11426, "err-build-failed")
+
+	// 会话源码快照
+	ErrSnapshotEmpty            = web.NewErr(http.StatusOK, 11430, "err-snapshot-empty")
+	ErrSnapshotSyncFailed       = web.NewErr(http.StatusOK, 11431, "err-snapshot-sync-failed")
+	ErrSnapshotTooLarge         = web.NewErr(http.StatusOK, 11432, "err-snapshot-too-large")
+	ErrSnapshotNotFound         = web.NewErr(http.StatusOK, 11433, "err-snapshot-not-found")
+	ErrSnapshotStale            = web.NewErr(http.StatusOK, 11434, "err-snapshot-stale")
+	ErrSnapshotCorrupt          = web.NewErr(http.StatusOK, 11435, "err-snapshot-corrupt")
+	ErrAppSourceSnapshotUnbound = web.NewErr(http.StatusOK, 11436, "err-app-source-snapshot-unbound")
 )

@@ -26,6 +26,8 @@ const (
 	FieldPackageID = "package_id"
 	// FieldIconKey holds the string denoting the icon_key field in the database.
 	FieldIconKey = "icon_key"
+	// FieldSourceSnapshotID holds the string denoting the source_snapshot_id field in the database.
+	FieldSourceSnapshotID = "source_snapshot_id"
 	// FieldAdNetwork holds the string denoting the ad_network field in the database.
 	FieldAdNetwork = "ad_network"
 	// FieldAdAppID holds the string denoting the ad_app_id field in the database.
@@ -71,6 +73,7 @@ var Columns = []string{
 	FieldName,
 	FieldPackageID,
 	FieldIconKey,
+	FieldSourceSnapshotID,
 	FieldAdNetwork,
 	FieldAdAppID,
 	FieldEnabledPlatforms,
@@ -156,6 +159,11 @@ func ByPackageID(opts ...sql.OrderTermOption) OrderOption {
 // ByIconKey orders the results by the icon_key field.
 func ByIconKey(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIconKey, opts...).ToFunc()
+}
+
+// BySourceSnapshotID orders the results by the source_snapshot_id field.
+func BySourceSnapshotID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSourceSnapshotID, opts...).ToFunc()
 }
 
 // ByAdNetwork orders the results by the ad_network field.
