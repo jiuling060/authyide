@@ -508,3 +508,13 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - **构建会往模板目录写中间产物，是个待查隐患**：gradle 日志里有 `Hard link ... to '/opt/authyide/src/mobile/node_modules/react-native-reanimated/android/build/intermediates/...'`，`react-native-reanimated` 的 android 工程目录解析到了模板而非工作区副本。这正是最初重复报错中「模板侧路径」的来源。CMake 对 gradle transform 缓存跨设备硬链接失败会自动降级为慢拷贝，不影响正确性，但模板树会被污染、后续构建可能互相干扰。
   - **`persist log tail failed: pq: invalid byte sequence for encoding "UTF8": 0x91/0x93/0x96`**：gradle 的 Metro 进度条字节不是合法 UTF-8，写 Postgres 的 `text` 列被拒。仅影响日志尾部落库，不阻塞构建，也不影响日志文件本身。要让状态页有实时进度，得在写入前清洗掉非法字节。
   - **Go 复合字面量不能用「提升字段名」做键**：`AndroidConfig` 内嵌 `SharedConfig` 时，`AndroidConfig{BuildTimeout: ...}` 报 `unknown field BuildTimeout`，必须写成 `AndroidConfig{SharedConfig: SharedConfig{BuildTimeout: ...}}`。写测试构造 runner 时容易踩。
+
+[APK 签名链：canonical keystore 曾静默漂移]
+- Date: 2026-10-25
+- Context: 把 10-24 管线产物重签发布到 /static 下载位时发现指纹对不上，追溯出服务器 keystore 已被同 alias 的新密钥覆盖
+- Category: 运维部署|排错调试|构建方法
+- Instructions:
+  - **canonical 签名密钥：服务器 `/root/apk-side-load.keystore`（alias `authyide`，store/key 口令均为 `authyide`），证书 SHA256 `376baed6403cb6edc570327deb6c337aabd834ca3af5a676470512756e852512`**；本地原件在 `/tmp/authyide-side.keystore`（同一把）。10-23 当天服务器上的该路径被同 alias 的新密钥重新生成过，alias 相同、SF 文件名也相同，**唯一可靠的鉴别手段是比对证书指纹**（`apksigner verify --print-certs` 对 APK，`keytool -list -v` 对 keystore；keytool 输出大写、apksigner 小写，比对前统一大小写），看 mtime 和 alias 都会误判。
+  - **替换静态下载位前必须做升级链校验**：新签名包的证书指纹必须等于现役 `authyide.apk` 的指纹，否则已装用户无法覆盖安装。2026-10-25 已把正确 keystore 写回服务器 canonical 路径（旧文件留 `.bak-<ts>`），此后直接用它签名即可。
+  - **发布流程**（参考 `/tmp/opencode/deploy-teamhost/90-resign-publish.sh`）：`zipalign -p -f 4` → `apksigner sign --v1/v2/v3/v4-signing-enabled true`（v4 顺带产出 `.idsig`，与 apk 一起覆盖到 `/opt/authyide/data/static/`）→ `curl 127.0.0.1/static/authyide.apk` 比对字节数与 sha256 收尾。binary keystore 走 SSH 的办法：本地 base64 内嵌进脚本再远程 `base64 -d`，2748 字节无压力。
+  - **当前下载位（2026-10-25 06:54 UTC）**：versionCode 5 / versionName 1.0.0-test.100804（10-24 pickFirsts 修复后的管线构建），57,294,944 字节，sha256 `bb336eec6c30df62b49e530e91f170b8b8a55b2bd01bcf158121a6eba6ec3fec`；此前 10-23 版备份在 `authyide.apk.bak-20261025-*`。手机端 `DEFAULT_BASE_URL` 与版本命名见 mobile 条目。
